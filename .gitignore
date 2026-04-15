@@ -5,7 +5,7 @@ package-lock.json
 *.log
 
 # Go
-spec-link
+/spec-link/spec-link
 /spec-link/bin/
 *.exe
 *.exe~

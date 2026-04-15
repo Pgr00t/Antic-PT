@@ -1,0 +1,21 @@
+# Antic-PT Spec-Link Configuration
+
+port: 4000
+prefix: "/spec"
+
+vault:
+  driver: "memory"       # "memory" (v1.0) or "redis" (v1.1)
+  default_ttl_ms: 30000
+
+intent:
+  mode: "auto"           # "auto", "guided", or "bypass"
+  ai_confidence_threshold: 0.75
+
+formal_track:
+  # Upstream points to your actual backend.
+  # Set to "embedded" for demo mode, which spawns a built-in mock API.
+  upstream: "embedded"
+  timeout_ms: 5000
+
+reconciliation:
+  strategy: "patch"      # "patch" or "replace"
