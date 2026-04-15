@@ -1,0 +1,17 @@
+# Node.js
+node_modules/
+.npm
+package-lock.json
+*.log
+
+# Go
+spec-link
+/spec-link/bin/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# macOS
+.DS_Store
