@@ -1,9 +1,10 @@
 // Package proxy contains the core Spec-Link dual-track logic.
 //
 // Industry-standard dual-track architecture:
-//   HandleSpec forks one incoming GET request into two concurrent execution paths:
-//     • Fast Track  – Reads the State-Vault and emits a "speculative" SSE event.
-//     • Formal Track – Proxies to the upstream API and emits reconciliation signals.
+//
+//	HandleSpec forks one incoming GET request into two concurrent execution paths:
+//	  • Fast Track  – Reads the State-Vault and emits a "speculative" SSE event.
+//	  • Formal Track – Proxies to the upstream API and emits reconciliation signals.
 package proxy
 
 import (
@@ -28,11 +29,11 @@ import (
 // sseEvent represents a single Server-Sent Event message sent to the client.
 type sseEvent struct {
 	// Event is the SSE event type (e.g., "speculative", "confirm", "patch").
-	Event    string
+	Event string
 	// ID is the resource version associated with this event.
-	ID       string
+	ID string
 	// Data is the JSON-serializable payload.
-	Data     any
+	Data any
 	// Terminal signifies if this is the final event in the stream.
 	Terminal bool
 }
@@ -264,10 +265,10 @@ func (h *Handler) runFormalTrack(
 		// Cache miss — send REPLACE (client has no speculative data yet).
 		payload := copyMap(freshData)
 		payload["_antic"] = map[string]any{
-			"version":                newEntry.Version,
-			"source":                 "live",
+			"version":                 newEntry.Version,
+			"source":                  "live",
 			"formal_track_latency_ms": formalLatencyMs,
-			"session_id":             sessionID,
+			"session_id":              sessionID,
 		}
 		h.send(ctx, out, sseEvent{
 			Event:    "replace",
@@ -315,10 +316,10 @@ func (h *Handler) runFormalTrack(
 		// REPLACE — large diff, send full payload.
 		payload := copyMap(freshData)
 		payload["_antic"] = map[string]any{
-			"version":                newEntry.Version,
-			"source":                 "live",
+			"version":                 newEntry.Version,
+			"source":                  "live",
 			"formal_track_latency_ms": formalLatencyMs,
-			"session_id":             sessionID,
+			"session_id":              sessionID,
 		}
 		h.send(ctx, out, sseEvent{
 			Event:    "replace",
@@ -367,7 +368,7 @@ func (h *Handler) setSSEHeaders(w http.ResponseWriter, sessionID string) {
 	w.Header().Set("Connection", "keep-alive")
 	w.Header().Set("X-Antic-Session-ID", sessionID)
 	w.Header().Set("Access-Control-Allow-Origin", "*")
-	w.Header().Set("X-Accel-Buffering", "no") 
+	w.Header().Set("X-Accel-Buffering", "no")
 }
 
 func (h *Handler) send(ctx context.Context, out chan<- sseEvent, ev sseEvent) {
@@ -461,7 +462,7 @@ func diffMaps(oldMap, newMap map[string]interface{}) []PatchOp {
 			ops = append(ops, PatchOp{Op: "add", Path: "/" + k, Value: newVal})
 			continue
 		}
-		
+
 		oj, _ := json.Marshal(oldVal)
 		nj, _ := json.Marshal(newVal)
 		if !bytes.Equal(oj, nj) {

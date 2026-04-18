@@ -11,9 +11,9 @@ import (
 // Entry represents a single versioned snapshot of a resource stored in the vault.
 type Entry struct {
 	// Data is the raw resource payload.
-	Data      map[string]interface{}
+	Data map[string]interface{}
 	// Version is the monotonic version number of this entry.
-	Version   int
+	Version int
 	// UpdatedAt is the timestamp when this entry was last written.
 	UpdatedAt time.Time
 }

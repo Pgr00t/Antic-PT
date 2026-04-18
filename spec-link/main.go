@@ -199,14 +199,14 @@ func printBanner(cfg *config.SpecLinkConfig, clientDir string) {
 	fmt.Println("╔══════════════════════════════════════════════════════╗")
 	fmt.Println("║       ANTIC-PT  SPEC-LINK  v1.0  (Go)               ║")
 	fmt.Println("╠══════════════════════════════════════════════════════╣")
-	fmt.Printf( "║  Proxy:      http://localhost:%s               ║\n", padRight(strconv.Itoa(cfg.Port), 5))
-	fmt.Printf( "║  Spec route: http://localhost:%s%s       ║\n", strconv.Itoa(cfg.Port), padRight(cfg.Prefix, 10))
-	fmt.Printf( "║  Upstream:   %s  ║\n", padRight(cfg.FormalTrack.Upstream, 38))
-	fmt.Printf( "║  Vault:      %s                                  ║\n", padRight(cfg.Vault.Driver, 7))
+	fmt.Printf("║  Proxy:      http://localhost:%s               ║\n", padRight(strconv.Itoa(cfg.Port), 5))
+	fmt.Printf("║  Spec route: http://localhost:%s%s       ║\n", strconv.Itoa(cfg.Port), padRight(cfg.Prefix, 10))
+	fmt.Printf("║  Upstream:   %s  ║\n", padRight(cfg.FormalTrack.Upstream, 38))
+	fmt.Printf("║  Vault:      %s                                  ║\n", padRight(cfg.Vault.Driver, 7))
 	if clientDir != "" {
 		fmt.Printf("║  Demo UI:    http://localhost:%s               ║\n", padRight(strconv.Itoa(cfg.Port), 5))
 	}
-	fmt.Printf( "║  Demo API:   http://localhost:%s (embedded)     ║\n", padRight(strconv.Itoa(upstreamPort), 5))
+	fmt.Printf("║  Demo API:   http://localhost:%s (embedded)     ║\n", padRight(strconv.Itoa(upstreamPort), 5))
 	fmt.Println("╚══════════════════════════════════════════════════════╝")
 	fmt.Println()
 }
