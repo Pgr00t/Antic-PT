@@ -4,8 +4,11 @@ port: 4000
 prefix: "/spec"
 
 vault:
-  driver: "memory"       # "memory" (v1.0) or "redis" (v1.1)
-  default_ttl_ms: 30000
+  driver: "memory"       # "memory" or "redis"
+  # url: "redis://localhost:6379"   # Required when driver is "redis".
+  #                                 # Also accepts: redis://<user>:<pass>@<host>:<port>/<db>
+  #                                 # DragonflyDB works as a drop-in replacement.
+  default_ttl_ms: 30000            # Vault entries expire after this many ms.
 
 intent:
   mode: "auto"           # "auto", "guided", or "bypass"

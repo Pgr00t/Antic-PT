@@ -29,14 +29,25 @@ func main() {
 		log.Fatalf("❌  Failed to load config %q: %v", *cfgPath, err)
 	}
 
-	// Initialize the State-Vault.
-	var v *vault.MemoryVault
+	// Initialize the State-Vault with the configured driver.
+	var v vault.Vault
 	switch cfg.Vault.Driver {
 	case "memory", "":
-		v = vault.NewMemory()
-		seedDemoData(v)
+		mv := vault.NewMemory()
+		seedDemoData(mv)
+		v = mv
+	case "redis":
+		if cfg.Vault.URL == "" {
+			log.Fatalf("❌  vault.url must be set when using the redis driver")
+		}
+		rv, err := vault.NewRedis(cfg.Vault.URL, cfg.Vault.DefaultTTL)
+		if err != nil {
+			log.Fatalf("❌  Failed to connect to Redis: %v", err)
+		}
+		v = rv
+		log.Printf("✅  Redis vault connected: %s", cfg.Vault.URL)
 	default:
-		log.Fatalf("❌  Unsupported vault driver %q (Redis driver coming in v1.1)", cfg.Vault.Driver)
+		log.Fatalf("❌  Unsupported vault driver %q. Valid drivers: memory, redis", cfg.Vault.Driver)
 	}
 
 	// Start the demo upstream API if configured to do so.

@@ -1,29 +1,29 @@
 import { describe, it, expect } from 'vitest';
-import { applyPatch } from './reconciler';
+import { applyPatch, PatchOp } from './reconciler';
 import { SSEParser } from './parser';
 
 describe('Reconciler - applyPatch', () => {
   it('should apply add operations', () => {
     const data = { a: 1 };
-    const ops = [{ op: 'add', path: '/b', value: 2 }];
+    const ops: PatchOp[] = [{ op: 'add', path: '/b', value: 2 }];
     expect(applyPatch(data, ops)).toEqual({ a: 1, b: 2 });
   });
 
   it('should apply replace operations', () => {
     const data = { a: 1 };
-    const ops = [{ op: 'replace', path: '/a', value: 2 }];
+    const ops: PatchOp[] = [{ op: 'replace', path: '/a', value: 2 }];
     expect(applyPatch(data, ops)).toEqual({ a: 2 });
   });
 
   it('should apply remove operations', () => {
     const data = { a: 1, b: 2 };
-    const ops = [{ op: 'remove', path: '/b' }];
+    const ops: PatchOp[] = [{ op: 'remove', path: '/b' }];
     expect(applyPatch(data, ops)).toEqual({ a: 1 });
   });
 
   it('should handle nested paths', () => {
     const data = { user: { name: 'Alice' } };
-    const ops = [{ op: 'replace', path: '/user/name', value: 'Bob' }];
+    const ops: PatchOp[] = [{ op: 'replace', path: '/user/name', value: 'Bob' }];
     expect(applyPatch(data, ops)).toEqual({ user: { name: 'Bob' } });
   });
 });
