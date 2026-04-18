@@ -32,8 +32,37 @@ jobs:
       - name: Go Vet
         run: cd spec-link && go vet ./...
 
-      - name: Run Tests
-        run: cd spec-link && go test -v ./...
+      - name: Run Unit Tests
+        run: cd spec-link && go test -v -run "^Test[^Redis]" ./...
+
+  redis-integration:
+    name: Redis Integration Tests
+    runs-on: ubuntu-latest
+    services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Set up Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: '1.22'
+
+      - name: Install dependencies
+        run: cd spec-link && go mod download
+
+      - name: Run Redis Integration Tests
+        env:
+          REDIS_URL: redis://localhost:6379
+        run: cd spec-link && go test -v -run "^TestRedis" ./vault/...
 
   node-ci:
     name: Node.js Demo Check
