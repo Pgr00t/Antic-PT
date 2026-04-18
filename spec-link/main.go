@@ -1,13 +1,5 @@
-// Spec-Link — Antic-PT v1.0 Proxy (Go)
-//
-// Usage:
-//   spec-link                     # uses ./antic-pt.yaml
-//   spec-link --config /path/to/config.yaml
-//
-// Demo mode (default):
-//   When upstream is "embedded", a built-in mock API is served on a secondary
-//   port so you can see the full dual-track in action without any external
-//   service. This is the default for development and demonstration.
+// Package main provides the entry point for the Spec-Link proxy.
+// It initializes the configuration, vault storage, and starts the dual-track HTTP proxy.
 package main
 
 import (
@@ -37,35 +29,33 @@ func main() {
 		log.Fatalf("❌  Failed to load config %q: %v", *cfgPath, err)
 	}
 
-	// ── Vault ────────────────────────────────────────────────────────────
+	// Initialize the State-Vault.
 	var v *vault.MemoryVault
 	switch cfg.Vault.Driver {
 	case "memory", "":
 		v = vault.NewMemory()
 		seedDemoData(v)
 	default:
-		log.Fatalf("❌  Unsupported vault driver %q (Redis coming in v1.1)", cfg.Vault.Driver)
+		log.Fatalf("❌  Unsupported vault driver %q (Redis driver coming in v1.1)", cfg.Vault.Driver)
 	}
 
-	// ── Demo upstream ─────────────────────────────────────────────────────
-	// When config upstream == "embedded", we spin up a mock API server on
-	// port+1 so the full round-trip is visible in demos.
+	// Start the demo upstream API if configured to do so.
 	if strings.ToLower(cfg.FormalTrack.Upstream) == "embedded" || cfg.FormalTrack.Upstream == "" {
 		upstreamPort := cfg.Port + 1
 		cfg.FormalTrack.Upstream = fmt.Sprintf("http://localhost:%d", upstreamPort)
 		go startDemoUpstream(upstreamPort)
-		time.Sleep(50 * time.Millisecond) // give upstream a moment to bind
+		time.Sleep(50 * time.Millisecond) // Wait briefly for the server to start.
 	}
 
-	// ── Spec-Link Proxy ───────────────────────────────────────────────────
+	// Initialize the Spec-Link proxy handler.
 	handler := proxy.NewHandler(cfg, v)
 
 	mux := http.NewServeMux()
 
-	// /spec/* → Spec-Link dual-track
+	// Handle spec routes using the dual-track logic.
 	mux.HandleFunc(cfg.Prefix+"/", handler.HandleSpec)
 
-	// Static client files (demo UI)
+	// Serve static client files for the demo UI.
 	clientDir := resolveClientDir(*cfgPath)
 	if clientDir != "" {
 		mux.Handle("/", http.FileServer(http.Dir(clientDir)))
@@ -80,10 +70,43 @@ func main() {
 	}
 }
 
-// ────────────────────────────────────────────────────────────────────────────
-// Demo upstream server — simulates a real API with realistic latency
-// ────────────────────────────────────────────────────────────────────────────
+// startDemoUpstream runs a mock API server that simulates network and database latency.
+func startDemoUpstream(port int) {
+	mux := http.NewServeMux()
 
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		// Simulate data retrieval latency (280ms - 380ms).
+		delay := 280 + rand.Intn(100)
+		time.Sleep(time.Duration(delay) * time.Millisecond)
+
+		trimmed := strings.TrimPrefix(r.URL.Path, "/api/")
+		trimmed = strings.Trim(trimmed, "/")
+
+		data, ok := demoUpstreamDB[trimmed]
+		if !ok {
+			http.Error(w, `{"error":"not found"}`, http.StatusNotFound)
+			return
+		}
+
+		out := copyMap(data)
+		out["_meta"] = map[string]interface{}{
+			"latency_ms": delay,
+			"source":     "database",
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		json.NewEncoder(w).Encode(out)
+	})
+
+	addr := fmt.Sprintf(":%d", port)
+	log.Printf("🗄   Demo upstream listening on %s (simulates real-world latency)", addr)
+	if err := http.ListenAndServe(addr, mux); err != nil {
+		log.Fatalf("Demo upstream error: %v", err)
+	}
+}
+
+// demoUpstreamDB contains mock data for the demonstration environment.
 var demoUpstreamDB = map[string]map[string]interface{}{
 	"user/1": {
 		"id": 1, "name": "Alice Chen", "role": "Product Designer", "team": "Growth",
@@ -106,48 +129,7 @@ var demoUpstreamDB = map[string]map[string]interface{}{
 	},
 }
 
-func startDemoUpstream(port int) {
-	mux := http.NewServeMux()
-
-	// /api/{resource}/{id} — simulates a slow but real database query
-	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		// Simulate DB latency: 280–380ms (realistic P50 for a network + DB hop)
-		delay := 280 + rand.Intn(100)
-		time.Sleep(time.Duration(delay) * time.Millisecond)
-
-		// Parse resource/id from path (strip leading /api/)
-		trimmed := strings.TrimPrefix(r.URL.Path, "/api/")
-		trimmed = strings.Trim(trimmed, "/")
-
-		data, ok := demoUpstreamDB[trimmed]
-		if !ok {
-			http.Error(w, `{"error":"not found"}`, http.StatusNotFound)
-			return
-		}
-
-		// Attach timing metadata
-		out := copyMap(data)
-		out["_meta"] = map[string]interface{}{
-			"latency_ms": delay,
-			"source":     "database",
-		}
-
-		w.Header().Set("Content-Type", "application/json")
-		w.Header().Set("Access-Control-Allow-Origin", "*")
-		json.NewEncoder(w).Encode(out)
-	})
-
-	addr := fmt.Sprintf(":%d", port)
-	log.Printf("🗄   Demo upstream listening on %s (simulates ~300ms DB latency)", addr)
-	if err := http.ListenAndServe(addr, mux); err != nil {
-		log.Fatalf("Demo upstream error: %v", err)
-	}
-}
-
-// ────────────────────────────────────────────────────────────────────────────
-// Seed demo data into vault
-// ────────────────────────────────────────────────────────────────────────────
-
+// seedDemoData populates the vault with initial values for the demonstration.
 func seedDemoData(v *vault.MemoryVault) {
 	v.Seed("user", "1", map[string]interface{}{
 		"id": 1, "name": "Alice Chen", "role": "Product Designer", "team": "Growth",
@@ -172,10 +154,6 @@ func seedDemoData(v *vault.MemoryVault) {
 	}, 88)
 }
 
-// ────────────────────────────────────────────────────────────────────────────
-// CORS middleware
-// ────────────────────────────────────────────────────────────────────────────
-
 func corsMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
@@ -189,10 +167,6 @@ func corsMiddleware(next http.Handler) http.Handler {
 	})
 }
 
-// ────────────────────────────────────────────────────────────────────────────
-// Helpers
-// ────────────────────────────────────────────────────────────────────────────
-
 func copyMap(m map[string]interface{}) map[string]interface{} {
 	out := make(map[string]interface{}, len(m))
 	for k, v := range m {
@@ -201,8 +175,6 @@ func copyMap(m map[string]interface{}) map[string]interface{} {
 	return out
 }
 
-// resolveClientDir tries to find the demo client/ directory relative to the
-// config file's location so the server can serve the demo UI.
 func resolveClientDir(cfgPath string) string {
 	base := filepath.Dir(cfgPath)
 
@@ -220,6 +192,7 @@ func resolveClientDir(cfgPath string) string {
 	return ""
 }
 
+// printBanner displays a startup banner with server details.
 func printBanner(cfg *config.SpecLinkConfig, clientDir string) {
 	upstreamPort := cfg.Port + 1
 	fmt.Println()

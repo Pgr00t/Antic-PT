@@ -1,17 +1,9 @@
 // Package proxy contains the core Spec-Link dual-track logic.
 //
-// Architecture:
-//   HandleSpec forks one incoming GET /spec/{resource}/{id} into two concurrent
-//   goroutines:
-//     • Fast Track  – reads the State-Vault and emits a "speculative" SSE event
-//                     within a few milliseconds.
-//     • Formal Track – proxies the request to the real upstream API, waits for
-//                      the full response, compares it with the vault snapshot, and
-//                      then emits CONFIRM / PATCH / REPLACE / ABORT.
-//
-//   Both goroutines write typed events onto a shared channel; a single dedicated
-//   goroutine drains that channel and writes to the http.ResponseWriter, keeping
-//   concurrent access safe.
+// Industry-standard dual-track architecture:
+//   HandleSpec forks one incoming GET request into two concurrent execution paths:
+//     • Fast Track  – Reads the State-Vault and emits a "speculative" SSE event.
+//     • Formal Track – Proxies to the upstream API and emits reconciliation signals.
 package proxy
 
 import (
@@ -33,30 +25,26 @@ import (
 	"antic-pt/spec-link/vault"
 )
 
-// ────────────────────────────────────────────────────────────────────────────
-// SSE helper types
-// ────────────────────────────────────────────────────────────────────────────
-
-// sseEvent represents one Server-Sent Event.
+// sseEvent represents a single Server-Sent Event message sent to the client.
 type sseEvent struct {
-	Event    string // e.g. "speculative", "confirm", "patch" …
-	ID       string // resource version as string
-	Data     any    // will be JSON-marshalled
-	Terminal bool   // if true the writer goroutine closes the connection
+	// Event is the SSE event type (e.g., "speculative", "confirm", "patch").
+	Event    string
+	// ID is the resource version associated with this event.
+	ID       string
+	// Data is the JSON-serializable payload.
+	Data     any
+	// Terminal signifies if this is the final event in the stream.
+	Terminal bool
 }
 
-// ────────────────────────────────────────────────────────────────────────────
-// Handler
-// ────────────────────────────────────────────────────────────────────────────
-
-// Handler is the Spec-Link HTTP handler.
+// Handler implements the Spec-Link HTTP proxy logic.
 type Handler struct {
 	cfg        *config.SpecLinkConfig
 	vault      vault.Vault
 	httpClient *http.Client
 }
 
-// NewHandler creates a Handler wired to the supplied config and vault.
+// NewHandler initializes a new Handler with the provided configuration and vault storage.
 func NewHandler(cfg *config.SpecLinkConfig, v vault.Vault) *Handler {
 	return &Handler{
 		cfg:   cfg,
@@ -67,30 +55,23 @@ func NewHandler(cfg *config.SpecLinkConfig, v vault.Vault) *Handler {
 	}
 }
 
-// ────────────────────────────────────────────────────────────────────────────
-// HandleSpec — dual-track SSE endpoint
-// ────────────────────────────────────────────────────────────────────────────
-
-// HandleSpec handles all requests to /spec/{resource}/{id}.
+// HandleSpec manages the dual-track execution for a single request.
+// It forks the request into Fast and Formal tracks and streams results via SSE.
 func (h *Handler) HandleSpec(w http.ResponseWriter, r *http.Request) {
-	// Safety: Antic-PT v1.0 is reads-only.
+	// Antic-PT v1.0 is currently read-only.
 	if r.Method != http.MethodGet {
 		http.Error(w, `{"error":"Antic-PT v1.0 supports GET only","code":405}`, http.StatusMethodNotAllowed)
 		return
 	}
 
-	// ------------------------------------------------------------------
-	// 1. Parse path:  /spec/{resource}/{id}
-	// ------------------------------------------------------------------
+	// 1. Resolve resource and ID from the request path.
 	resource, id, err := parsePath(r.URL.Path, h.cfg.Prefix)
 	if err != nil {
 		http.Error(w, fmt.Sprintf(`{"error":"%s"}`, err.Error()), http.StatusBadRequest)
 		return
 	}
 
-	// ------------------------------------------------------------------
-	// 2. Read X-Antic-Intent mode
-	// ------------------------------------------------------------------
+	// 2. Determine the intent mode based on headers or configuration.
 	intentMode := r.Header.Get("X-Antic-Intent")
 	if intentMode == "" {
 		intentMode = h.cfg.Intent.Mode
@@ -100,9 +81,7 @@ func (h *Handler) HandleSpec(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// ------------------------------------------------------------------
-	// 3. Setup SSE transport
-	// ------------------------------------------------------------------
+	// 3. Initialize SSE streaming.
 	flusher, ok := w.(http.Flusher)
 	if !ok {
 		http.Error(w, "streaming not supported by this server", http.StatusInternalServerError)
@@ -112,36 +91,22 @@ func (h *Handler) HandleSpec(w http.ResponseWriter, r *http.Request) {
 	sessionID := newSessionID()
 	h.setSSEHeaders(w, sessionID)
 
-	// ------------------------------------------------------------------
-	// 4. Shared event channel — only one goroutine writes to w
-	// ------------------------------------------------------------------
+	// 4. Set up the event channel for coordinated SSE writing.
 	eventCh := make(chan sseEvent, 8)
 
-	// Request-scoped context with the formal-track timeout.
 	ctx, cancel := context.WithTimeout(r.Context(), h.cfg.FormalTrackTimeout())
 	defer cancel()
 
-	// Client-supplied last-known version (optional hint).
 	clientVersion := parseClientVersion(r)
 
-	// ------------------------------------------------------------------
-	// 5. Pre-fetch vault entry (done synchronously: it's a map lookup, ~µs)
-	// ------------------------------------------------------------------
+	// 5. Synchronously check the vault for an existing entry.
 	entry := h.vault.Get(resource, id)
 
-	// ------------------------------------------------------------------
-	// 6. Launch Fast Track goroutine
-	// ------------------------------------------------------------------
+	// 6. Launch concurrent execution tracks.
 	go h.runFastTrack(ctx, resource, id, entry, clientVersion, sessionID, eventCh)
-
-	// ------------------------------------------------------------------
-	// 7. Launch Formal Track goroutine
-	// ------------------------------------------------------------------
 	go h.runFormalTrack(ctx, r, resource, id, entry, sessionID, eventCh)
 
-	// ------------------------------------------------------------------
-	// 8. Single-writer: drain eventCh → ResponseWriter
-	// ------------------------------------------------------------------
+	// 7. Stream events to the response until completion or context cancellation.
 	for {
 		select {
 		case <-ctx.Done():
@@ -230,10 +195,7 @@ func (h *Handler) runFastTrack(
 	}
 }
 
-// ────────────────────────────────────────────────────────────────────────────
-// Formal Track
-// ────────────────────────────────────────────────────────────────────────────
-
+// runFormalTrack handles the authoritative execution path by proxying to the upstream API.
 func (h *Handler) runFormalTrack(
 	ctx context.Context,
 	r *http.Request,
@@ -294,12 +256,12 @@ func (h *Handler) runFormalTrack(
 
 	formalLatencyMs := time.Since(start).Milliseconds()
 
-	// Write fresh data back to vault.
+	// Update the vault with fresh data.
 	newEntry := h.vault.Set(resource, id, freshData)
 
-	// ── Reconciliation ──────────────────────────────────────────────────
+	// Reconciliation logic
 	if specEntry == nil {
-		// Was a cache miss — send REPLACE (client has no speculative data yet).
+		// Cache miss — send REPLACE (client has no speculative data yet).
 		payload := copyMap(freshData)
 		payload["_antic"] = map[string]any{
 			"version":                newEntry.Version,
@@ -318,7 +280,7 @@ func (h *Handler) runFormalTrack(
 
 	// Compare spec payload vs fresh payload.
 	if mapsEqual(specEntry.Data, freshData) {
-		// ✓ CONFIRM — speculative was 100% accurate.
+		// CONFIRM — speculative was 100% accurate.
 		h.send(ctx, out, sseEvent{
 			Event: "confirm",
 			ID:    strconv.Itoa(newEntry.Version),
@@ -334,11 +296,11 @@ func (h *Handler) runFormalTrack(
 		return
 	}
 
-	// Data changed — decide between PATCH and REPLACE.
+	// Data changed — decide between PATCH and REPLACE based on diff size.
 	patches := diffMaps(specEntry.Data, freshData)
 
 	if h.cfg.Reconcile.Strategy == "patch" && len(patches) <= 10 {
-		// △ PATCH — small delta, send JSON-patch ops.
+		// PATCH — small delta, send JSON-patch ops.
 		h.send(ctx, out, sseEvent{
 			Event: "patch",
 			ID:    strconv.Itoa(newEntry.Version),
@@ -350,7 +312,7 @@ func (h *Handler) runFormalTrack(
 			Terminal: true,
 		})
 	} else {
-		// ↺ REPLACE — large diff, send full payload.
+		// REPLACE — large diff, send full payload.
 		payload := copyMap(freshData)
 		payload["_antic"] = map[string]any{
 			"version":                newEntry.Version,
@@ -367,11 +329,7 @@ func (h *Handler) runFormalTrack(
 	}
 }
 
-// ────────────────────────────────────────────────────────────────────────────
-// Passthrough proxy (non-spec routes or bypass mode)
-// ────────────────────────────────────────────────────────────────────────────
-
-// HandlePassthrough is a transparent reverse-proxy for all non-spec routes.
+// HandlePassthrough provides a transparent reverse-proxy for non-spec routes.
 func (h *Handler) HandlePassthrough(w http.ResponseWriter, r *http.Request) {
 	upstreamURL := h.cfg.FormalTrack.Upstream + r.URL.RequestURI()
 
@@ -403,17 +361,13 @@ func (h *Handler) HandlePassthrough(w http.ResponseWriter, r *http.Request) {
 	io.Copy(w, resp.Body)
 }
 
-// ────────────────────────────────────────────────────────────────────────────
-// Helpers
-// ────────────────────────────────────────────────────────────────────────────
-
 func (h *Handler) setSSEHeaders(w http.ResponseWriter, sessionID string) {
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
 	w.Header().Set("X-Antic-Session-ID", sessionID)
 	w.Header().Set("Access-Control-Allow-Origin", "*")
-	w.Header().Set("X-Accel-Buffering", "no") // Disable Nginx buffering
+	w.Header().Set("X-Accel-Buffering", "no") 
 }
 
 func (h *Handler) send(ctx context.Context, out chan<- sseEvent, ev sseEvent) {
@@ -436,7 +390,7 @@ func (h *Handler) sendAbort(ctx context.Context, out chan<- sseEvent, reason str
 	})
 }
 
-// writeSSEEvent formats and writes a single SSE event to w.
+// writeSSEEvent serializes and writes a single SSE event to the client.
 func writeSSEEvent(w io.Writer, ev sseEvent) error {
 	data, err := json.Marshal(ev.Data)
 	if err != nil {
@@ -450,7 +404,7 @@ func writeSSEEvent(w io.Writer, ev sseEvent) error {
 	return err
 }
 
-// parsePath splits "/spec/users/123" → ("users", "123", nil).
+// parsePath extracts the resource and ID from a URL path.
 func parsePath(urlPath, prefix string) (resource, id string, err error) {
 	trimmed := strings.TrimPrefix(urlPath, prefix)
 	parts := strings.Split(strings.Trim(trimmed, "/"), "/")
@@ -460,20 +414,19 @@ func parsePath(urlPath, prefix string) (resource, id string, err error) {
 	return path.Clean(parts[0]), path.Clean(parts[1]), nil
 }
 
-// parseClientVersion reads X-Antic-Version header (optional).
+// parseClientVersion extracts the X-Antic-Version header if present.
 func parseClientVersion(r *http.Request) int {
 	v, _ := strconv.Atoi(r.Header.Get("X-Antic-Version"))
 	return v
 }
 
-// newSessionID generates a unique 8-byte hex session identifier.
+// newSessionID generates a random 8-byte hex session identifier.
 func newSessionID() string {
 	b := make([]byte, 8)
 	rand.Read(b)
 	return hex.EncodeToString(b)
 }
 
-// copyMap returns a shallow copy of m.
 func copyMap(m map[string]interface{}) map[string]interface{} {
 	out := make(map[string]interface{}, len(m))
 	for k, v := range m {
@@ -482,43 +435,40 @@ func copyMap(m map[string]interface{}) map[string]interface{} {
 	return out
 }
 
-// mapsEqual compares two flat maps by JSON representation.
 func mapsEqual(a, b map[string]interface{}) bool {
 	aj, _ := json.Marshal(a)
 	bj, _ := json.Marshal(b)
 	return bytes.Equal(aj, bj)
 }
 
-// PatchOp is a single RFC 6902 JSON-patch operation.
+// PatchOp defines a single RFC 6902 JSON Patch operation.
 type PatchOp struct {
 	Op    string `json:"op"`
 	Path  string `json:"path"`
 	Value any    `json:"value,omitempty"`
 }
 
-// diffMaps computes a flat RFC 6902 patch between oldMap and newMap.
-// Only "replace" and "add" ops are generated (sufficient for flat objects).
+// diffMaps calculates the difference between two maps as a list of PatchOps.
 func diffMaps(oldMap, newMap map[string]interface{}) []PatchOp {
 	var ops []PatchOp
 
-	// Added or changed fields
 	for k, newVal := range newMap {
 		if k == "_antic" || k == "_meta" {
 			continue
 		}
-		oldVal := oldMap[k]
+		oldVal, exists := oldMap[k]
+		if !exists {
+			ops = append(ops, PatchOp{Op: "add", Path: "/" + k, Value: newVal})
+			continue
+		}
+		
 		oj, _ := json.Marshal(oldVal)
 		nj, _ := json.Marshal(newVal)
 		if !bytes.Equal(oj, nj) {
-			op := "replace"
-			if _, exists := oldMap[k]; !exists {
-				op = "add"
-			}
-			ops = append(ops, PatchOp{Op: op, Path: "/" + k, Value: newVal})
+			ops = append(ops, PatchOp{Op: "replace", Path: "/" + k, Value: newVal})
 		}
 	}
 
-	// Removed fields
 	for k := range oldMap {
 		if k == "_antic" || k == "_meta" {
 			continue
