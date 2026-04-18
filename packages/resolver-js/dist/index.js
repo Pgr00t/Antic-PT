@@ -203,6 +203,83 @@ var AnticResolver = class {
   static reconcile(data, ops) {
     return applyPatch(data, ops);
   }
+  /**
+   * Initiates an optimistic write operation (POST, PUT, PATCH, DELETE).
+   *
+   * Fires onOptimistic immediately with the predicted new state, then awaits
+   * the server response and fires onCommitted (success) or onReverted (failure).
+   *
+   * @example
+   * resolver.mutate('/spec/user/1', {
+   *   method: 'PUT',
+   *   body: { name: 'Bob' },
+   *   onOptimistic: (data) => render(data),     // ~0ms
+   *   onCommitted: (data) => syncState(data),   // ~120ms
+   *   onReverted: (reason) => rollback(reason), // on error
+   * });
+   */
+  async mutate(path, options) {
+    const url = `${this.baseUrl}${path}`;
+    const controller = new AbortController();
+    const headers = {
+      "Accept": "text/event-stream",
+      "Content-Type": "application/json"
+    };
+    try {
+      const response = await fetch(url, {
+        method: options.method,
+        headers,
+        body: options.body ? JSON.stringify(options.body) : void 0,
+        signal: controller.signal
+      });
+      if (!response.ok || !response.body) {
+        options.onReverted?.("network_error", response.status);
+        return { cancel: () => {
+        } };
+      }
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      const parser = new SSEParser((ev) => {
+        this.handleMutationEvent(ev, options);
+      });
+      (async () => {
+        try {
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            parser.push(decoder.decode(value, { stream: true }));
+          }
+        } catch (err) {
+          if (err.name !== "AbortError") {
+            options.onReverted?.("stream_interrupted", 0);
+          }
+        }
+      })();
+      return { cancel: () => controller.abort() };
+    } catch {
+      options.onReverted?.("network_error", 0);
+      return { cancel: () => {
+      } };
+    }
+  }
+  handleMutationEvent(ev, options) {
+    try {
+      const payload = ev.data ? JSON.parse(ev.data) : null;
+      switch (ev.event) {
+        case "optimistic":
+          options.onOptimistic?.(payload?.data ?? null);
+          break;
+        case "committed":
+          options.onCommitted?.(payload?.data ?? null, payload?.latency_ms ?? 0);
+          break;
+        case "reverted":
+          options.onReverted?.(payload?.reason ?? "unknown", payload?.code ?? 0, payload?.detail);
+          break;
+      }
+    } catch (err) {
+      console.error("[AnticResolver] Failed to parse mutation event:", err);
+    }
+  }
 };
 
 // src/index.ts

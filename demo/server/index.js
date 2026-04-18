@@ -78,6 +78,55 @@ app.get("/vault/:resource/:id", (req, res) => {
 const metrics = { standard_requests: 0, antic_requests: 0, cache_hits: 0, confirms: 0, patches: 0, replaces: 0 };
 app.get("/metrics", (req, res) => res.json(metrics));
 
+/**
+ * Mutation Routes — used by the Spec-Link proxy to forward write operations.
+ * These simulate an upstream API that accepts and persists changes.
+ */
+
+/**
+ * PUT /api/:resource/:id
+ * Full resource replacement. Returns the updated resource.
+ * Validates that the name field is non-empty to demonstrate server-side rejection.
+ */
+app.put("/api/:resource/:id", async (req, res) => {
+  const { resource, id } = req.params;
+  const key = `${resource}/${id}`;
+
+  // Rejected update — demonstrate server-side validation.
+  if (req.body.name !== undefined && req.body.name.trim() === "") {
+    return res.status(422).json({ error: "name cannot be empty" });
+  }
+
+  // Simulate DB latency.
+  const dbDelay = 100 + Math.random() * 100;
+  await new Promise((r) => setTimeout(r, dbDelay));
+
+  if (!standardDB[key]) return res.status(404).json({ error: "Not found" });
+
+  // Merge update into current state.
+  standardDB[key] = { ...standardDB[key], ...req.body };
+
+  res.json({ ...standardDB[key], _meta: { latency_ms: Math.round(dbDelay), source: "database" } });
+});
+
+/**
+ * DELETE /api/:resource/:id
+ * Removes a resource. Returns 204 No Content on success.
+ */
+app.delete("/api/:resource/:id", async (req, res) => {
+  const { resource, id } = req.params;
+  const key = `${resource}/${id}`;
+
+  if (!standardDB[key]) return res.status(404).json({ error: "Not found" });
+
+  const dbDelay = 80 + Math.random() * 60;
+  await new Promise((r) => setTimeout(r, dbDelay));
+
+  delete standardDB[key];
+
+  res.status(204).send();
+});
+
 app.listen(PORT, () => {
   console.log(`
 ╔══════════════════════════════════════════════════════╗

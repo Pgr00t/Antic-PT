@@ -22,3 +22,8 @@ formal_track:
 
 reconciliation:
   strategy: "patch"      # "patch" or "replace"
+
+mutations:
+  enabled: true                   # Set false to keep the proxy read-only.
+  # body_limit_bytes: 1048576     # 1MB (industry default). Override if needed.
+  conflict_policy: "server-wins"  # Server response is always sent to client on committed.

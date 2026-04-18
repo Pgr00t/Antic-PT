@@ -22,6 +22,8 @@ type SpecLinkConfig struct {
 	FormalTrack FormalTrackConfig `yaml:"formal_track"`
 	// Reconcile contains configuration for track reconciliation strategies.
 	Reconcile ReconcileConfig `yaml:"reconciliation"`
+	// Mutations controls write-operation (POST/PUT/PATCH/DELETE) behaviour.
+	Mutations MutationsConfig `yaml:"mutations"`
 }
 
 // VaultConfig defines the connection and behaviour settings for the State-Vault.
@@ -54,6 +56,17 @@ type FormalTrackConfig struct {
 type ReconcileConfig struct {
 	// Strategy specifies the reconciliation mode ("patch", "replace").
 	Strategy string `yaml:"strategy"`
+}
+
+// MutationsConfig controls write-operation behaviour in the proxy.
+type MutationsConfig struct {
+	// Enabled controls whether POST/PUT/PATCH/DELETE are proxied optimistically.
+	Enabled bool `yaml:"enabled"`
+	// BodyLimitBytes is the maximum accepted request body size for mutations (default: 1MB).
+	BodyLimitBytes int64 `yaml:"body_limit_bytes"`
+	// ConflictPolicy controls what happens when the server response differs from the client payload.
+	// "server-wins" (default): always send the real server response to the client on committed.
+	ConflictPolicy string `yaml:"conflict_policy"`
 }
 
 // FormalTrackTimeout returns the upstream timeout as a time.Duration.
@@ -98,6 +111,13 @@ func Load(path string) (*SpecLinkConfig, error) {
 	}
 	if cfg.Reconcile.Strategy == "" {
 		cfg.Reconcile.Strategy = "patch"
+	}
+	// Mutations defaults
+	if cfg.Mutations.BodyLimitBytes == 0 {
+		cfg.Mutations.BodyLimitBytes = 1 << 20 // 1MB — nginx/industry standard
+	}
+	if cfg.Mutations.ConflictPolicy == "" {
+		cfg.Mutations.ConflictPolicy = "server-wins"
 	}
 
 	return &cfg, nil

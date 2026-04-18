@@ -56,12 +56,31 @@ func NewHandler(cfg *config.SpecLinkConfig, v vault.Vault) *Handler {
 	}
 }
 
-// HandleSpec manages the dual-track execution for a single request.
-// It forks the request into Fast and Formal tracks and streams results via SSE.
+// HandleSpec manages dual-track execution for GET requests
+// and optimistic mutation handling for POST/PUT/PATCH/DELETE.
 func (h *Handler) HandleSpec(w http.ResponseWriter, r *http.Request) {
-	// Antic-PT v1.0 is currently read-only.
-	if r.Method != http.MethodGet {
-		http.Error(w, `{"error":"Antic-PT v1.0 supports GET only","code":405}`, http.StatusMethodNotAllowed)
+	// Handle CORS preflight.
+	if r.Method == http.MethodOptions {
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Antic-Intent, X-Antic-Version")
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+
+	// Route mutating methods to the optimistic mutation handler.
+	switch r.Method {
+	case http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete:
+		if !h.cfg.Mutations.Enabled {
+			http.Error(w, `{"error":"mutations are disabled","code":405}`, http.StatusMethodNotAllowed)
+			return
+		}
+		h.HandleMutation(w, r)
+		return
+	case http.MethodGet:
+		// Fall through to dual-track read logic below.
+	default:
+		http.Error(w, `{"error":"method not allowed","code":405}`, http.StatusMethodNotAllowed)
 		return
 	}
 
@@ -328,6 +347,200 @@ func (h *Handler) runFormalTrack(
 			Terminal: true,
 		})
 	}
+}
+
+// HandleMutation handles optimistic write operations (POST, PUT, PATCH, DELETE).
+// It immediately streams an "optimistic" event, then forwards the mutation to
+// the upstream and streams either "committed" or "reverted" based on the outcome.
+func (h *Handler) HandleMutation(w http.ResponseWriter, r *http.Request) {
+	resource, id, err := parsePath(r.URL.Path, h.cfg.Prefix)
+	if err != nil {
+		http.Error(w, fmt.Sprintf(`{"error":"%s"}`, err.Error()), http.StatusBadRequest)
+		return
+	}
+
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		http.Error(w, "streaming not supported", http.StatusInternalServerError)
+		return
+	}
+
+	sessionID := newSessionID()
+	h.setSSEHeaders(w, sessionID)
+
+	// Read and limit the request body.
+	body, err := io.ReadAll(io.LimitReader(r.Body, h.cfg.Mutations.BodyLimitBytes))
+	if err != nil {
+		http.Error(w, `{"error":"failed to read request body"}`, http.StatusBadRequest)
+		return
+	}
+
+	// Parse the client's intended new state (if body is JSON).
+	var clientData map[string]interface{}
+	if len(body) > 0 {
+		_ = json.Unmarshal(body, &clientData)
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), h.cfg.FormalTrackTimeout())
+	defer cancel()
+
+	// Build the optimistic preview: for PUT/PATCH, merge client intent over current vault state.
+	// For DELETE, the optimistic event signals removal.
+	optimisticData := h.buildOptimistic(r.Method, resource, id, clientData)
+
+	// Emit "optimistic" immediately — client applies mutation locally.
+	ev := sseEvent{
+		Event: "optimistic",
+		ID:    sessionID,
+		Data: map[string]any{
+			"method":     r.Method,
+			"resource":   resource,
+			"id":         id,
+			"data":       optimisticData,
+			"session_id": sessionID,
+		},
+	}
+	if err := writeSSEEvent(w, ev); err != nil {
+		return
+	}
+	flusher.Flush()
+
+	// Forward mutation to upstream asynchronously and send committed/reverted.
+	h.runMutationTrack(ctx, w, flusher, r, resource, id, body, clientData, sessionID)
+}
+
+// buildOptimistic constructs the predicted state after a mutation.
+// For PUT: use client body as-is. For PATCH: merge over vault entry. For DELETE: nil.
+func (h *Handler) buildOptimistic(method, resource, id string, clientData map[string]interface{}) map[string]interface{} {
+	switch method {
+	case http.MethodDelete:
+		return nil
+	case http.MethodPatch:
+		// Merge client patch fields over the current vault entry.
+		existing := h.vault.Get(resource, id)
+		if existing != nil {
+			merged := copyMap(existing.Data)
+			for k, v := range clientData {
+				merged[k] = v
+			}
+			return merged
+		}
+	}
+	// PUT and POST: use client body directly.
+	return clientData
+}
+
+// runMutationTrack forwards the mutation to upstream and emits committed or reverted.
+func (h *Handler) runMutationTrack(
+	ctx context.Context,
+	w http.ResponseWriter,
+	flusher http.Flusher,
+	r *http.Request,
+	resource, id string,
+	body []byte,
+	clientData map[string]interface{},
+	sessionID string,
+) {
+	start := time.Now()
+
+	upstreamPath := strings.TrimPrefix(r.URL.Path, h.cfg.Prefix)
+	upstreamURL := h.cfg.FormalTrack.Upstream + upstreamPath
+	if r.URL.RawQuery != "" {
+		upstreamURL += "?" + r.URL.RawQuery
+	}
+
+	req, err := http.NewRequestWithContext(ctx, r.Method, upstreamURL, bytes.NewReader(body))
+	if err != nil {
+		h.writeMutationAbort(w, flusher, sessionID, "request_build_error", 500)
+		return
+	}
+	// Forward relevant headers.
+	for _, hdr := range []string{"Content-Type", "Authorization", "Accept"} {
+		if v := r.Header.Get(hdr); v != "" {
+			req.Header.Set(hdr, v)
+		}
+	}
+	if req.Header.Get("Content-Type") == "" {
+		req.Header.Set("Content-Type", "application/json")
+	}
+
+	resp, err := h.httpClient.Do(req)
+	if err != nil {
+		h.writeMutationAbort(w, flusher, sessionID, "upstream_unreachable", 503)
+		return
+	}
+	defer resp.Body.Close()
+
+	latencyMs := time.Since(start).Milliseconds()
+
+	// Non-2xx means the upstream rejected the mutation — client must revert.
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		ev := sseEvent{
+			Event: "reverted",
+			ID:    sessionID,
+			Data: map[string]any{
+				"reason":     fmt.Sprintf("upstream_%d", resp.StatusCode),
+				"code":       resp.StatusCode,
+				"detail":     string(respBody),
+				"session_id": sessionID,
+			},
+			Terminal: true,
+		}
+		writeSSEEvent(w, ev)
+		flusher.Flush()
+		return
+	}
+
+	// 2xx success — update vault and send committed with server's actual response.
+	var serverData map[string]interface{}
+	if r.Method != http.MethodDelete {
+		respBody, _ := io.ReadAll(io.LimitReader(resp.Body, h.cfg.Mutations.BodyLimitBytes))
+		if len(respBody) > 0 {
+			_ = json.Unmarshal(respBody, &serverData)
+		}
+		// Fall back to client data if server returned no body (e.g., 204).
+		if serverData == nil {
+			serverData = clientData
+		}
+		h.vault.Set(resource, id, serverData)
+	} else {
+		// DELETE: evict from vault.
+		h.vault.Delete(resource, id)
+	}
+
+	// server-wins: always send actual server response so client has ground truth.
+	ev := sseEvent{
+		Event: "committed",
+		ID:    sessionID,
+		Data: map[string]any{
+			"method":     r.Method,
+			"resource":   resource,
+			"id":         id,
+			"data":       serverData, // nil for DELETE
+			"latency_ms": latencyMs,
+			"session_id": sessionID,
+		},
+		Terminal: true,
+	}
+	writeSSEEvent(w, ev)
+	flusher.Flush()
+}
+
+// writeMutationAbort emits a reverted event for infrastructure-level errors.
+func (h *Handler) writeMutationAbort(w http.ResponseWriter, flusher http.Flusher, sessionID, reason string, code int) {
+	ev := sseEvent{
+		Event: "reverted",
+		ID:    sessionID,
+		Data: map[string]any{
+			"reason":     reason,
+			"code":       code,
+			"session_id": sessionID,
+		},
+		Terminal: true,
+	}
+	writeSSEEvent(w, ev)
+	flusher.Flush()
 }
 
 // HandlePassthrough provides a transparent reverse-proxy for non-spec routes.
