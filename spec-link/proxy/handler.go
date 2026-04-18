@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"antic-pt/spec-link/config"
+	"antic-pt/spec-link/intent"
 	"antic-pt/spec-link/vault"
 )
 
@@ -42,14 +43,16 @@ type sseEvent struct {
 type Handler struct {
 	cfg        *config.SpecLinkConfig
 	vault      vault.Vault
+	scorer     *intent.Scorer
 	httpClient *http.Client
 }
 
-// NewHandler initializes a new Handler with the provided configuration and vault storage.
-func NewHandler(cfg *config.SpecLinkConfig, v vault.Vault) *Handler {
+// NewHandler initializes a new Handler with the provided configuration, vault storage, and scorer.
+func NewHandler(cfg *config.SpecLinkConfig, v vault.Vault, scorer *intent.Scorer) *Handler {
 	return &Handler{
-		cfg:   cfg,
-		vault: v,
+		cfg:    cfg,
+		vault:  v,
+		scorer: scorer,
 		httpClient: &http.Client{
 			Timeout: cfg.FormalTrackTimeout() + 2*time.Second,
 		},
@@ -122,8 +125,19 @@ func (h *Handler) HandleSpec(w http.ResponseWriter, r *http.Request) {
 	// 5. Synchronously check the vault for an existing entry.
 	entry := h.vault.Get(resource, id)
 
-	// 6. Launch concurrent execution tracks.
-	go h.runFastTrack(ctx, resource, id, entry, clientVersion, sessionID, eventCh)
+	// 6. Compute confidence score and decide whether to speculate.
+	//    In "guided" mode the client trusts its own X-Antic-Intent header;
+	//    in "auto" mode the scorer makes the call.
+	confidenceScore := h.scorer.Score(resource, entry)
+	shouldSpeculate := entry != nil && (intentMode == "guided" || confidenceScore >= h.cfg.Intent.AIConfidenceThresh)
+
+	if !shouldSpeculate && entry != nil {
+		log.Printf("[spec-link] score %.2f < threshold %.2f for %s/%s — skipping speculation",
+			confidenceScore, h.cfg.Intent.AIConfidenceThresh, resource, id)
+	}
+
+	// 7. Launch concurrent execution tracks.
+	go h.runFastTrack(ctx, resource, id, entry, clientVersion, sessionID, confidenceScore, shouldSpeculate, eventCh)
 	go h.runFormalTrack(ctx, r, resource, id, entry, sessionID, eventCh)
 
 	// 7. Stream events to the response until completion or context cancellation.
@@ -157,6 +171,8 @@ func (h *Handler) runFastTrack(
 	entry *vault.Entry,
 	clientVersion int,
 	sessionID string,
+	confidenceScore float64,
+	shouldSpeculate bool,
 	out chan<- sseEvent,
 ) {
 	start := time.Now()
@@ -170,6 +186,23 @@ func (h *Handler) runFastTrack(
 			Data: map[string]any{
 				"type":    "cache-miss",
 				"message": "No vault entry found. Awaiting formal track.",
+			},
+		}:
+		case <-ctx.Done():
+		}
+		return
+	}
+
+	if !shouldSpeculate {
+		// Score below threshold — inform client we are deferring to formal track.
+		select {
+		case out <- sseEvent{
+			Event: "meta",
+			ID:    "0",
+			Data: map[string]any{
+				"type":             "low-confidence",
+				"message":          "Confidence score below threshold. Awaiting formal track.",
+				"confidence_score": confidenceScore,
 			},
 		}:
 		case <-ctx.Done():
@@ -195,13 +228,14 @@ func (h *Handler) runFastTrack(
 
 	latencyMs := time.Since(start).Milliseconds()
 
-	// Build the speculative payload — embed _antic metadata envelope.
+	// Build the speculative payload — embed _antic metadata envelope including the confidence score.
 	payload := copyMap(entry.Data)
 	payload["_antic"] = map[string]any{
 		"version":               entry.Version,
 		"source":                "vault",
 		"age_ms":                entry.AgeMS(),
 		"fast_track_latency_ms": latencyMs,
+		"confidence_score":      confidenceScore,
 		"session_id":            sessionID,
 	}
 
@@ -300,7 +334,8 @@ func (h *Handler) runFormalTrack(
 
 	// Compare spec payload vs fresh payload.
 	if mapsEqual(specEntry.Data, freshData) {
-		// CONFIRM — speculative was 100% accurate.
+		// CONFIRM — speculative was 100% accurate. Improve scorer.
+		h.scorer.RecordOutcome(resource, "confirm")
 		h.send(ctx, out, sseEvent{
 			Event: "confirm",
 			ID:    strconv.Itoa(newEntry.Version),
@@ -320,7 +355,8 @@ func (h *Handler) runFormalTrack(
 	patches := diffMaps(specEntry.Data, freshData)
 
 	if h.cfg.Reconcile.Strategy == "patch" && len(patches) <= 10 {
-		// PATCH — small delta, send JSON-patch ops.
+		// PATCH — small delta. Record as a miss so scorer learns the resource is volatile.
+		h.scorer.RecordOutcome(resource, "patch")
 		h.send(ctx, out, sseEvent{
 			Event: "patch",
 			ID:    strconv.Itoa(newEntry.Version),
@@ -332,7 +368,8 @@ func (h *Handler) runFormalTrack(
 			Terminal: true,
 		})
 	} else {
-		// REPLACE — large diff, send full payload.
+		// REPLACE — large diff. Record as a miss.
+		h.scorer.RecordOutcome(resource, "replace")
 		payload := copyMap(freshData)
 		payload["_antic"] = map[string]any{
 			"version":                 newEntry.Version,

@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"antic-pt/spec-link/config"
+	"antic-pt/spec-link/intent"
 	"antic-pt/spec-link/proxy"
 	"antic-pt/spec-link/vault"
 )
@@ -58,8 +59,11 @@ func main() {
 		time.Sleep(50 * time.Millisecond) // Wait briefly for the server to start.
 	}
 
+	// Initialize the intent scorer.
+	scorer := intent.NewScorer()
+
 	// Initialize the Spec-Link proxy handler.
-	handler := proxy.NewHandler(cfg, v)
+	handler := proxy.NewHandler(cfg, v, scorer)
 
 	mux := http.NewServeMux()
 
