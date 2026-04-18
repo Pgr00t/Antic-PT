@@ -1,0 +1,54 @@
+name: Antic-PT CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  go-ci:
+    name: Go Lint and Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Set up Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: '1.22'
+
+      - name: Install dependencies
+        run: cd spec-link && go mod download
+
+      - name: Verify formatting
+        run: |
+          if [ -n "$(gofmt -l spec-link/)" ]; then
+            echo "Go files are not formatted. Run 'go fmt ./...'."
+            gofmt -d spec-link/
+            exit 1
+          fi
+
+      - name: Go Vet
+        run: cd spec-link && go vet ./...
+
+      - name: Run Tests
+        run: cd spec-link && go test -v ./...
+
+  node-ci:
+    name: Node.js Demo Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '20'
+
+      - name: Install dependencies
+        run: cd demo/server && npm install
+
+      # Add linting here if ESLint is configured
+      # - name: Run Lint
+      #   run: cd demo/server && npm run lint
