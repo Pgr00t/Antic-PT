@@ -17,6 +17,18 @@ Antic-PT is designed to be a **drop-in layer** in front of any existing REST API
 * [`spec-link/`](./spec-link) - The production-grade Go middleware proxy that implements the Antic-PT dual-track logic.
 * [`demo/`](./demo) - A demonstration environment featuring an Express standard-REST API alongside the Antic-PT interface, complete with a beautifully visualized client dashboard.
 
+## Development Commands
+
+A `Makefile` is provided in the root directory for common tasks:
+
+```bash
+make build         # Build the Spec-Link proxy
+make run           # Run Spec-Link (Go)
+make demo-server   # Run the Node.js demo app
+make fmt           # Format the codebase
+make test          # Run Go unit tests
+```
+
 ## Running the Demo (Node.js Reference)
 
 A fully visualized demonstration environment using Server-Sent Events (SSE) to showcase the dual-track system.
