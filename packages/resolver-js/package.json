@@ -1,0 +1,33 @@
+{
+  "name": "@antic-pt/resolver",
+  "version": "0.1.0",
+  "description": "Official JavaScript/TypeScript Resolver SDK for the Anticipation Protocol (Antic-PT)",
+  "main": "dist/index.js",
+  "module": "dist/index.mjs",
+  "types": "dist/index.d.ts",
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsup src/index.ts --format cjs,esm,iife --global-name AnticPT --dts --clean",
+    "test": "vitest run",
+    "lint": "eslint src/**/*.ts"
+  },
+  "keywords": [
+    "antic-pt",
+    "speculation",
+    "latency",
+    "api",
+    "protocol",
+    "sse"
+  ],
+  "author": "Antic-PT Open Source Project",
+  "license": "MIT",
+  "devDependencies": {
+    "glob": "^13.0.6",
+    "rmdir-promise": "^1.0.0",
+    "tsup": "^8.5.1",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.4"
+  }
+}

@@ -840,6 +840,7 @@
     </footer>
   </div>
 
+  <script src="lib/antic-resolver.js"></script>
   <script>
     // ─── State ───────────────────────────────────────────────────────────
     const BASE = 'http://localhost:4000';
@@ -1020,124 +1021,92 @@
       const start = performance.now();
       let fastTrackDone = false;
       let formalLatency = null;
+      let speculativeData = null;
 
-      const evtSource = new EventSource(`${BASE}/spec/${currentResource}/${currentId}`);
+      const resolver = new AnticPT.AnticResolver(BASE);
+      
+      resolver.fetch(`/spec/${currentResource}/${currentId}`, {
+        intent: 'auto',
+        onSpeculative: (data, meta) => {
+          const elapsed = Math.round(performance.now() - start);
+          speculativeData = data;
+          
+          barFast.style.width = '100%';
+          timeFast.textContent = `Fast Track: ${elapsed}ms`;
+          latencyEl.textContent = `${elapsed}ms`;
+          latencyEl.className = 'panel-latency latency-antic';
+          display.className = 'data-display speculative';
+          renderData('display-antic', currentResource, data);
+
+          signalContainer.innerHTML = `<span class="signal-badge signal-speculative">⚡ Speculative</span>`;
+          logEvent('fast', `speculative event (v${meta.version}, age ${meta.age_ms}ms)`, elapsed);
+          fastTrackDone = true;
+
+          updateStats(null, elapsed, null);
+          updateViz(null, elapsed, null);
+        },
+        onConfirm: (version) => {
+          const elapsed = Math.round(performance.now() - start);
+          display.className = 'data-display speculative confirmed';
+          signalContainer.innerHTML = `<span class="signal-badge signal-confirm">✓ Confirmed</span>`;
+
+          logEvent('formal', `CONFIRM — speculative was accurate (v${version})`, formalLatency);
+          updateViz(null, null, formalLatency);
+          requestInFlight = false;
+          setButtonsDisabled(false);
+        },
+        onPatch: (ops) => {
+          const elapsed = Math.round(performance.now() - start);
+          display.className = 'data-display speculative patched';
+          signalContainer.innerHTML = `<span class="signal-badge signal-patch">△ Patched</span>`;
+
+          logEvent('formal', `PATCH — ${ops.length || 0} field(s) updated`, formalLatency);
+          logEvent('system', `Applying patch: ${ops.map(o => o.path).join(', ')}`);
+
+          // Apply patch using the SDK's reconciler
+          if (speculativeData) {
+            speculativeData = AnticPT.AnticResolver.reconcile(speculativeData, ops);
+            renderData('display-antic', currentResource, speculativeData);
+          }
+          
+          updateViz(null, null, formalLatency);
+          requestInFlight = false;
+          setButtonsDisabled(false);
+        },
+        onReplace: (data) => {
+          const meta = data._antic || {};
+          const elapsed = Math.round(performance.now() - start);
+          formalLatency = meta.formal_track_latency_ms || elapsed;
+          delete data._antic;
+
+          barFormal.style.width = '100%';
+          timeFormal.textContent = `Formal Track: ${formalLatency}ms`;
+          display.className = 'data-display';
+          renderData('display-antic', currentResource, data);
+          signalContainer.innerHTML = `<span class="signal-badge signal-replace">↺ Replaced</span>`;
+
+          if (!fastTrackDone) {
+            const perceived = Math.round(performance.now() - start);
+            latencyEl.textContent = `${perceived}ms`;
+            latencyEl.className = 'panel-latency latency-antic';
+            logEvent('formal', `REPLACE (cache miss) — full data from DB`, perceived);
+          } else {
+            logEvent('formal', `REPLACE — data changed significantly`, formalLatency);
+          }
+          updateViz(null, null, formalLatency);
+          requestInFlight = false;
+          setButtonsDisabled(false);
+        },
+        onAbort: (reason, code) => {
+          logEvent('formal', `ABORT — ${reason} (code ${code || '?'})`);
+          display.innerHTML = `<div class="data-placeholder" style="color:var(--rose-400)">❌ ${reason}</div>`;
+          signalContainer.innerHTML = `<span class="signal-badge signal-abort">✕ Aborted</span>`;
+          requestInFlight = false;
+          setButtonsDisabled(false);
+        }
+      });
 
       animateBar(barFormal, 0, 90, 400);
-
-      evtSource.addEventListener('speculative', (e) => {
-        const elapsed = Math.round(performance.now() - start);
-        const data = JSON.parse(e.data);
-        const meta = data._antic || {};
-        delete data._antic;
-
-        barFast.style.width = '100%';
-        timeFast.textContent = `Fast Track: ${elapsed}ms`;
-        latencyEl.textContent = `${elapsed}ms`;
-        latencyEl.className = 'panel-latency latency-antic';
-        display.className = 'data-display speculative';
-        renderData('display-antic', currentResource, data);
-
-        signalContainer.innerHTML = `<span class="signal-badge signal-speculative">⚡ Speculative</span>`;
-        logEvent('fast', `speculative event (v${meta.version || e.lastEventId}, age ${meta.age_ms || '?'}ms)`, elapsed);
-        fastTrackDone = true;
-
-        updateStats(null, elapsed, null);
-        updateViz(null, elapsed, null);
-      });
-
-      evtSource.addEventListener('confirm', (e) => {
-        const data = JSON.parse(e.data);
-        const elapsed = Math.round(performance.now() - start);
-        formalLatency = data.formal_track_latency_ms;
-
-        barFormal.style.width = '100%';
-        timeFormal.textContent = `Formal Track: ${formalLatency}ms`;
-        display.className = 'data-display speculative confirmed';
-        signalContainer.innerHTML = `<span class="signal-badge signal-confirm">✓ Confirmed</span>`;
-
-        logEvent('formal', `CONFIRM — speculative was accurate (v${e.lastEventId})`, formalLatency);
-        updateViz(null, null, formalLatency);
-        evtSource.close();
-        requestInFlight = false;
-        setButtonsDisabled(false);
-      });
-
-      evtSource.addEventListener('patch', (e) => {
-        const data = JSON.parse(e.data);
-        const elapsed = Math.round(performance.now() - start);
-        formalLatency = data.formal_track_latency_ms;
-
-        barFormal.style.width = '100%';
-        timeFormal.textContent = `Formal Track: ${formalLatency}ms`;
-        display.className = 'data-display speculative patched';
-        signalContainer.innerHTML = `<span class="signal-badge signal-patch">△ Patched</span>`;
-
-        logEvent('formal', `PATCH — ${data.ops?.length || 0} field(s) updated (v${e.lastEventId})`, formalLatency);
-
-        if (data.ops) {
-          const currentDisplayEl = document.getElementById('display-antic');
-          logEvent('system', `Patch ops: ${data.ops.map(o => o.path).join(', ')}`);
-        }
-        updateViz(null, null, formalLatency);
-        evtSource.close();
-        requestInFlight = false;
-        setButtonsDisabled(false);
-      });
-
-      evtSource.addEventListener('replace', (e) => {
-        const data = JSON.parse(e.data);
-        const meta = data._antic || {};
-        const elapsed = Math.round(performance.now() - start);
-        formalLatency = meta.formal_track_latency_ms || elapsed;
-        delete data._antic;
-
-        barFormal.style.width = '100%';
-        timeFormal.textContent = `Formal Track: ${formalLatency}ms`;
-        display.className = 'data-display';
-        renderData('display-antic', currentResource, data);
-        signalContainer.innerHTML = `<span class="signal-badge signal-replace">↺ Replaced</span>`;
-
-        if (!fastTrackDone) {
-          const perceived = Math.round(performance.now() - start);
-          latencyEl.textContent = `${perceived}ms`;
-          latencyEl.className = 'panel-latency latency-antic';
-          logEvent('formal', `REPLACE (cache miss) — full data from DB (v${e.lastEventId})`, perceived);
-        } else {
-          logEvent('formal', `REPLACE — data changed significantly (v${e.lastEventId})`, formalLatency);
-        }
-        updateViz(null, null, formalLatency);
-        evtSource.close();
-        requestInFlight = false;
-        setButtonsDisabled(false);
-      });
-
-      evtSource.addEventListener('meta', (e) => {
-        const data = JSON.parse(e.data);
-        logEvent('system', `META: ${data.type} — ${data.message}`);
-        if (data.type === 'cache-miss') {
-          display.innerHTML = '<div class="data-placeholder" style="color:var(--text-muted)">⌛ Cache miss — awaiting formal track...</div>';
-          barFast.style.width = '100%';
-          timeFast.textContent = 'Cache miss';
-          signalContainer.innerHTML = `<span class="signal-badge" style="background:rgba(255,255,255,0.05);color:var(--text-muted);border:1px solid var(--border)">Cache miss</span>`;
-        }
-      });
-
-      evtSource.addEventListener('abort', (e) => {
-        const data = JSON.parse(e.data);
-        logEvent('formal', `ABORT — ${data.reason} (code ${data.code})`);
-        display.innerHTML = `<div class="data-placeholder" style="color:var(--rose-400)">❌ ${data.reason}</div>`;
-        signalContainer.innerHTML = `<span class="signal-badge signal-abort">✕ Aborted</span>`;
-        evtSource.close();
-        requestInFlight = false;
-        setButtonsDisabled(false);
-      });
-
-      evtSource.onerror = () => {
-        evtSource.close();
-        requestInFlight = false;
-        setButtonsDisabled(false);
-      };
     }
 
     // ─── Helpers ──────────────────────────────────────────────────────────

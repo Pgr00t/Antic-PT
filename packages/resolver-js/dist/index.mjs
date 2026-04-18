@@ -1,0 +1,186 @@
+// src/parser.ts
+var SSEParser = class {
+  buffer = "";
+  onEvent;
+  constructor(onEvent) {
+    this.onEvent = onEvent;
+  }
+  /**
+   * Push a chunk of data (typically from a Uint8Array) into the parser.
+   */
+  push(chunk) {
+    this.buffer += chunk;
+    const lines = this.buffer.split(/\r?\n/);
+    this.buffer = lines.pop() || "";
+    let currentEvent = {};
+    for (const line of lines) {
+      if (line.trim() === "") {
+        if (currentEvent.event || currentEvent.id || currentEvent.data) {
+          this.onEvent({
+            event: currentEvent.event || "message",
+            id: currentEvent.id || "",
+            data: currentEvent.data || ""
+          });
+          currentEvent = {};
+        }
+        continue;
+      }
+      const colonIndex = line.indexOf(":");
+      if (colonIndex === -1) continue;
+      const field = line.slice(0, colonIndex).trim();
+      let value = line.slice(colonIndex + 1);
+      if (value.startsWith(" ")) value = value.slice(1);
+      switch (field) {
+        case "event":
+          currentEvent.event = value;
+          break;
+        case "id":
+          currentEvent.id = value;
+          break;
+        case "data":
+          currentEvent.data = currentEvent.data ? currentEvent.data + "\n" + value : value;
+          break;
+      }
+    }
+  }
+};
+
+// src/reconciler.ts
+function applyPatch(data, ops) {
+  const result = JSON.parse(JSON.stringify(data));
+  for (const op of ops) {
+    applyOperation(result, op);
+  }
+  return result;
+}
+function applyOperation(obj, op) {
+  const parts = op.path.split("/").filter((p) => p !== "");
+  if (parts.length === 0) return;
+  let current = obj;
+  for (let i = 0; i < parts.length - 1; i++) {
+    const key = parts[i];
+    if (!(key in current)) {
+      if (op.op === "add") {
+        current[key] = {};
+      } else {
+        return;
+      }
+    }
+    current = current[key];
+  }
+  const targetKey = parts[parts.length - 1];
+  switch (op.op) {
+    case "add":
+    case "replace":
+      current[targetKey] = op.value;
+      break;
+    case "remove":
+      if (Array.isArray(current)) {
+        const index = parseInt(targetKey, 10);
+        if (!isNaN(index)) current.splice(index, 1);
+      } else {
+        delete current[targetKey];
+      }
+      break;
+  }
+}
+
+// src/resolver.ts
+var AnticResolver = class {
+  baseUrl;
+  constructor(baseUrl = "") {
+    this.baseUrl = baseUrl.endsWith("/") ? baseUrl.slice(0, -1) : baseUrl;
+  }
+  /**
+   * Initiates a dual-track Antic-PT request.
+   */
+  async fetch(path, options) {
+    const url = `${this.baseUrl}${path}`;
+    const controller = new AbortController();
+    const headers = {
+      "Accept": "text/event-stream",
+      "X-Antic-Intent": options.intent || "auto"
+    };
+    try {
+      const response = await fetch(url, {
+        headers,
+        signal: controller.signal
+      });
+      if (!response.ok) {
+        options.onAbort?.("initial_fetch_failed", response.status);
+        return { cancel: () => {
+        } };
+      }
+      if (!response.body) {
+        options.onAbort?.("no_response_body");
+        return { cancel: () => {
+        } };
+      }
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      const parser = new SSEParser((ev) => {
+        this.handleEvent(ev, options);
+      });
+      (async () => {
+        try {
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            parser.push(decoder.decode(value, { stream: true }));
+          }
+        } catch (err) {
+          if (err.name !== "AbortError") {
+            options.onAbort?.("stream_interrupted");
+          }
+        }
+      })();
+      return {
+        cancel: () => controller.abort()
+      };
+    } catch (err) {
+      options.onAbort?.("network_error");
+      return { cancel: () => {
+      } };
+    }
+  }
+  handleEvent(ev, options) {
+    try {
+      const payload = ev.data ? JSON.parse(ev.data) : null;
+      const version = parseInt(ev.id, 10);
+      switch (ev.event) {
+        case "speculative":
+          options.onSpeculative?.(payload, payload?._antic);
+          break;
+        case "confirm":
+          options.onConfirm?.(version);
+          break;
+        case "patch":
+          options.onPatch?.(payload.ops);
+          break;
+        case "replace":
+          options.onReplace?.(payload);
+          break;
+        case "abort":
+          options.onAbort?.(payload.reason, payload.code);
+          break;
+      }
+    } catch (err) {
+      console.error("[AnticResolver] Failed to parse event data:", err);
+    }
+  }
+  /**
+   * Helper utility for manual reconciliation (if needed).
+   */
+  static reconcile(data, ops) {
+    return applyPatch(data, ops);
+  }
+};
+
+// src/index.ts
+var index_default = AnticResolver;
+export {
+  AnticResolver,
+  SSEParser,
+  applyPatch,
+  index_default as default
+};
