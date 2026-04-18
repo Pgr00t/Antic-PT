@@ -1,7 +1,9 @@
 /**
  * ANTIC-PT DEMO SERVER
- * Exposes both Standard REST and Antic-PT endpoints side-by-side
- * for live latency comparison.
+ * 
+ * This server demonstrates the Anticipation Protocol by exposing both
+ * standard REST endpoints and Antic-PT speculative endpoints side-by-side.
+ * It allows for live latency comparison in the frontend dashboard.
  */
 
 const express = require("express");
@@ -16,12 +18,10 @@ const PORT = 4000;
 app.use(cors());
 app.use(express.json());
 
-// Serve the frontend client
+// Serve the frontend client assets.
 app.use(express.static(path.join(__dirname, "../client")));
 
-// ─────────────────────────────────────────────────────────
-// STANDARD REST API — Sequential, blocking, realistic delay
-// ─────────────────────────────────────────────────────────
+// Standard mock database for demonstration.
 const standardDB = {
   "user/1": { id: 1, name: "Alice Chen", role: "Product Designer", team: "Growth", avatar: "AC", projects: 12, tasks_open: 4, tasks_done: 91, streak_days: 14, last_active: "just now", kpi_score: 95 },
   "feed/1": { items: [
@@ -33,11 +33,15 @@ const standardDB = {
   "dashboard/1": { revenue: 128400, revenue_delta: 12.4, active_users: 4821, users_delta: 8.1, conversion: 3.72, conv_delta: 0.43, latency_p99: 187, latency_delta: -34 },
 };
 
+/**
+ * Standard REST API Route.
+ * Simulates a sequential, blocking database query with realistic network delay.
+ */
 app.get("/api/:resource/:id", async (req, res) => {
   const { resource, id } = req.params;
   const key = `${resource}/${id}`;
 
-  // Simulate realistic DB latency
+  // Simulate realistic database latency (300-400ms).
   const dbDelay = 300 + Math.random() * 100;
   await new Promise((r) => setTimeout(r, dbDelay));
 
@@ -50,14 +54,16 @@ app.get("/api/:resource/:id", async (req, res) => {
   });
 });
 
-// ─────────────────────────────────────────────────────────
-// ANTIC-PT — Dual-stream SSE endpoint
-// ─────────────────────────────────────────────────────────
+/**
+ * Antic-PT SSE Route.
+ * Implements the dual-track speculator logic.
+ */
 app.get("/spec/:resource/:id", specLinkHandler);
 
-// ─────────────────────────────────────────────────────────
-// VAULT INSPECTOR — Dev tool to inspect State-Vault state
-// ─────────────────────────────────────────────────────────
+/**
+ * Vault Inspector Route.
+ * Developer tool to inspect the current state of the in-memory State-Vault.
+ */
 app.get("/vault/:resource/:id", (req, res) => {
   const { resource, id } = req.params;
   const entry = vaultGet(resource, id);
@@ -65,11 +71,11 @@ app.get("/vault/:resource/:id", (req, res) => {
   res.json(entry);
 });
 
-// ─────────────────────────────────────────────────────────
-// METRICS — Live stats
-// ─────────────────────────────────────────────────────────
+/**
+ * Metrics Route.
+ * Exposes live performance and reconciliation statistics.
+ */
 const metrics = { standard_requests: 0, antic_requests: 0, cache_hits: 0, confirms: 0, patches: 0, replaces: 0 };
-
 app.get("/metrics", (req, res) => res.json(metrics));
 
 app.listen(PORT, () => {
