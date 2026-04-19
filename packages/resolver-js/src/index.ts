@@ -1,7 +1,18 @@
-export * from './resolver';
-export type { MutateOptions } from './resolver';
-export * from './reconciler';
-export * from './parser';
+// Antic-PT v0.2 — AnticipationResolver SDK public exports.
 
-import { AnticResolver } from './resolver';
-export default AnticResolver;
+export {
+  AnticipationResolver,
+} from './resolver';
+
+export type {
+  ResolverMeta,
+  ResolverOptions,
+  ResolverStatus,
+  AbandonMeta,
+  PatchOp,
+  VolatilityLevel,
+} from './resolver';
+
+// Default export for script-tag / IIFE usage.
+import { AnticipationResolver } from './resolver';
+export default AnticipationResolver;

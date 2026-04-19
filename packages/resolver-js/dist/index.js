@@ -20,273 +20,320 @@ var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: tru
 // src/index.ts
 var index_exports = {};
 __export(index_exports, {
-  AnticResolver: () => AnticResolver,
-  SSEParser: () => SSEParser,
-  applyPatch: () => applyPatch,
+  AnticipationResolver: () => AnticipationResolver,
   default: () => index_default
 });
 module.exports = __toCommonJS(index_exports);
 
-// src/parser.ts
-var SSEParser = class {
-  buffer = "";
-  onEvent;
-  constructor(onEvent) {
-    this.onEvent = onEvent;
+// src/resolver.ts
+function getClientId() {
+  const KEY = "__antic_client_id";
+  try {
+    const stored = localStorage.getItem(KEY);
+    if (stored) return stored;
+    const id = generateId();
+    localStorage.setItem(KEY, id);
+    return id;
+  } catch {
+    return generateId();
   }
-  /**
-   * Push a chunk of data (typically from a Uint8Array) into the parser.
-   */
-  push(chunk) {
-    this.buffer += chunk;
-    const lines = this.buffer.split(/\r?\n/);
-    this.buffer = lines.pop() || "";
-    let currentEvent = {};
-    for (const line of lines) {
-      if (line.trim() === "") {
-        if (currentEvent.event || currentEvent.id || currentEvent.data) {
-          this.onEvent({
-            event: currentEvent.event || "message",
-            id: currentEvent.id || "",
-            data: currentEvent.data || ""
-          });
-          currentEvent = {};
-        }
-        continue;
-      }
-      const colonIndex = line.indexOf(":");
-      if (colonIndex === -1) continue;
-      const field = line.slice(0, colonIndex).trim();
-      let value = line.slice(colonIndex + 1);
-      if (value.startsWith(" ")) value = value.slice(1);
-      switch (field) {
-        case "event":
-          currentEvent.event = value;
-          break;
-        case "id":
-          currentEvent.id = value;
-          break;
-        case "data":
-          currentEvent.data = currentEvent.data ? currentEvent.data + "\n" + value : value;
-          break;
-      }
+}
+function generateId() {
+  const bytes = new Uint8Array(16);
+  if (typeof crypto !== "undefined" && crypto.getRandomValues) {
+    crypto.getRandomValues(bytes);
+  } else {
+    for (let i = 0; i < 16; i++) bytes[i] = Math.floor(Math.random() * 256);
+  }
+  return Array.from(bytes).map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+var SignalChannel = class _SignalChannel {
+  static instances = /* @__PURE__ */ new Map();
+  es = null;
+  handlers = /* @__PURE__ */ new Map();
+  url;
+  reconnectTimer = null;
+  constructor(baseUrl, clientId) {
+    this.url = `${baseUrl}/antic/signals?client_id=${clientId}`;
+    this.connect();
+  }
+  static getInstance(baseUrl, clientId) {
+    const key = `${baseUrl}::${clientId}`;
+    if (!_SignalChannel.instances.has(key)) {
+      _SignalChannel.instances.set(key, new _SignalChannel(baseUrl, clientId));
     }
+    return _SignalChannel.instances.get(key);
+  }
+  connect() {
+    if (typeof EventSource === "undefined") return;
+    this.es = new EventSource(this.url);
+    const SIGNAL_EVENTS = ["patch", "fill", "confirm", "replace", "abort"];
+    for (const evType of SIGNAL_EVENTS) {
+      this.es.addEventListener(evType, (e) => {
+        const msg = e;
+        try {
+          const payload = JSON.parse(msg.data);
+          const reconcileId = payload.id ?? msg.lastEventId;
+          const handler = this.handlers.get(reconcileId);
+          if (handler) handler(evType, payload);
+        } catch {
+        }
+      });
+    }
+    this.es.onerror = () => {
+      this.handlers.forEach((handler) => {
+        handler("abort", { reason: "connection_lost", retryable: true });
+      });
+    };
+  }
+  /** Subscribe to signals for a specific Reconcile ID. Returns an unsubscribe function. */
+  subscribe(reconcileId, handler) {
+    this.handlers.set(reconcileId, handler);
+    return () => this.handlers.delete(reconcileId);
   }
 };
-
-// src/reconciler.ts
-function applyPatch(data, ops) {
-  const result = JSON.parse(JSON.stringify(data));
-  for (const op of ops) {
-    applyOperation(result, op);
+function parseVolatility(header) {
+  const result = {};
+  if (!header) return result;
+  for (const part of header.split(",")) {
+    const [key, val] = part.trim().split("=");
+    if (key && val) {
+      result[key.trim()] = val.trim();
+    }
   }
   return result;
 }
-function applyOperation(obj, op) {
-  const parts = op.path.split("/").filter((p) => p !== "");
-  if (parts.length === 0) return;
-  let current = obj;
-  for (let i = 0; i < parts.length - 1; i++) {
-    const key = parts[i];
-    if (!(key in current)) {
-      if (op.op === "add") {
-        current[key] = {};
-      } else {
-        return;
-      }
-    }
-    current = current[key];
-  }
-  const targetKey = parts[parts.length - 1];
-  switch (op.op) {
-    case "add":
-    case "replace":
-      current[targetKey] = op.value;
-      break;
-    case "remove":
-      if (Array.isArray(current)) {
-        const index = parseInt(targetKey, 10);
-        if (!isNaN(index)) current.splice(index, 1);
-      } else {
-        delete current[targetKey];
-      }
-      break;
-  }
+function parseDeferredFields(header) {
+  if (!header || !header.trim()) return [];
+  return header.split(",").map((s) => s.trim()).filter(Boolean);
 }
-
-// src/resolver.ts
-var AnticResolver = class {
+var AnticipationResolver = class {
+  path;
   baseUrl;
-  constructor(baseUrl = "") {
-    this.baseUrl = baseUrl.endsWith("/") ? baseUrl.slice(0, -1) : baseUrl;
+  maxWindow;
+  onTimeout;
+  clientId;
+  handlers = {};
+  status = "idle";
+  // State for FILL-before-PATCH buffering (spec §9.4, §11.6)
+  pendingFill = null;
+  fillBufferTimer = null;
+  deferredFields = [];
+  maxWindowTimer = null;
+  unsubscribeSignal = null;
+  constructor(path, options = {}) {
+    this.path = path;
+    this.baseUrl = options.baseUrl ?? (typeof window !== "undefined" ? window.location.origin : "");
+    this.maxWindow = options.maxWindow ?? 3e3;
+    this.onTimeout = options.onTimeout ?? "refetch";
+    this.clientId = getClientId();
   }
-  /**
-   * Initiates a dual-track Antic-PT request.
-   */
-  async fetch(path, options) {
-    const url = `${this.baseUrl}${path}`;
-    const controller = new AbortController();
-    const headers = {
-      "Accept": "text/event-stream",
-      "X-Antic-Intent": options.intent || "auto"
-    };
+  /** Register an event handler. */
+  on(event, handler) {
+    this.handlers[event] = handler;
+    return this;
+  }
+  /** Emit typed event to registered handler. */
+  emit(event, ...args) {
+    const h = this.handlers[event];
+    if (h) h(...args);
+  }
+  /** Fetch the resource speculatively. */
+  async fetch() {
+    this.cleanup();
+    this.status = "idle";
+    const url = `${this.baseUrl}${this.path}`;
+    let response;
     try {
-      const response = await fetch(url, {
-        headers,
-        signal: controller.signal
-      });
-      if (!response.ok) {
-        options.onAbort?.("initial_fetch_failed", response.status);
-        return { cancel: () => {
-        } };
-      }
-      if (!response.body) {
-        options.onAbort?.("no_response_body");
-        return { cancel: () => {
-        } };
-      }
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder();
-      const parser = new SSEParser((ev) => {
-        this.handleEvent(ev, options);
-      });
-      (async () => {
-        try {
-          while (true) {
-            const { done, value } = await reader.read();
-            if (done) break;
-            parser.push(decoder.decode(value, { stream: true }));
-          }
-        } catch (err) {
-          if (err.name !== "AbortError") {
-            options.onAbort?.("stream_interrupted");
-          }
+      response = await globalThis.fetch(url, {
+        headers: {
+          "Accept": "application/json",
+          "X-Antic-Client-Id": this.clientId
         }
-      })();
-      return {
-        cancel: () => controller.abort()
-      };
-    } catch (err) {
-      options.onAbort?.("network_error");
-      return { cancel: () => {
-      } };
-    }
-  }
-  handleEvent(ev, options) {
-    try {
-      const payload = ev.data ? JSON.parse(ev.data) : null;
-      const version = parseInt(ev.id, 10);
-      switch (ev.event) {
-        case "speculative":
-          options.onSpeculative?.(payload, payload?._antic);
-          break;
-        case "confirm":
-          options.onConfirm?.(version);
-          break;
-        case "patch":
-          options.onPatch?.(payload.ops);
-          break;
-        case "replace":
-          options.onReplace?.(payload);
-          break;
-        case "abort":
-          options.onAbort?.(payload.reason, payload.code);
-          break;
-      }
-    } catch (err) {
-      console.error("[AnticResolver] Failed to parse event data:", err);
-    }
-  }
-  /**
-   * Helper utility for manual reconciliation (if needed).
-   */
-  static reconcile(data, ops) {
-    return applyPatch(data, ops);
-  }
-  /**
-   * Initiates an optimistic write operation (POST, PUT, PATCH, DELETE).
-   *
-   * Fires onOptimistic immediately with the predicted new state, then awaits
-   * the server response and fires onCommitted (success) or onReverted (failure).
-   *
-   * @example
-   * resolver.mutate('/spec/user/1', {
-   *   method: 'PUT',
-   *   body: { name: 'Bob' },
-   *   onOptimistic: (data) => render(data),     // ~0ms
-   *   onCommitted: (data) => syncState(data),   // ~120ms
-   *   onReverted: (reason) => rollback(reason), // on error
-   * });
-   */
-  async mutate(path, options) {
-    const url = `${this.baseUrl}${path}`;
-    const controller = new AbortController();
-    const headers = {
-      "Accept": "text/event-stream",
-      "Content-Type": "application/json"
-    };
-    try {
-      const response = await fetch(url, {
-        method: options.method,
-        headers,
-        body: options.body ? JSON.stringify(options.body) : void 0,
-        signal: controller.signal
       });
-      if (!response.ok || !response.body) {
-        options.onReverted?.("network_error", response.status);
-        return { cancel: () => {
-        } };
-      }
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder();
-      const parser = new SSEParser((ev) => {
-        this.handleMutationEvent(ev, options);
-      });
-      (async () => {
-        try {
-          while (true) {
-            const { done, value } = await reader.read();
-            if (done) break;
-            parser.push(decoder.decode(value, { stream: true }));
-          }
-        } catch (err) {
-          if (err.name !== "AbortError") {
-            options.onReverted?.("stream_interrupted", 0);
-          }
-        }
-      })();
-      return { cancel: () => controller.abort() };
     } catch {
-      options.onReverted?.("network_error", 0);
-      return { cancel: () => {
-      } };
+      this.emit("abort", "network_error", true);
+      this.status = "error";
+      return;
+    }
+    if (!response.ok) {
+      this.emit("abort", `http_${response.status}`, response.status >= 500);
+      this.status = "error";
+      return;
+    }
+    let data;
+    try {
+      data = await response.json();
+    } catch {
+      this.emit("abort", "parse_error", false);
+      this.status = "error";
+      return;
+    }
+    const state = response.headers.get("X-Antic-State");
+    if (state === "confirmed" || !state) {
+      const meta2 = {
+        staleness: 0,
+        reconciledId: "",
+        volatility: {},
+        deferredFields: [],
+        endpointVolatility: "low"
+      };
+      this.status = "confirmed";
+      this.emit("speculative", data, meta2);
+      this.emit("confirm");
+      return;
+    }
+    const reconcileId = response.headers.get("X-Antic-Reconcile-Id") ?? "";
+    const staleness = parseInt(response.headers.get("X-Antic-Staleness") ?? "0", 10);
+    const maxWindowHeader = parseInt(response.headers.get("X-Antic-Max-Window") ?? String(this.maxWindow), 10);
+    const volatility = parseVolatility(response.headers.get("X-Antic-Volatility"));
+    this.deferredFields = parseDeferredFields(response.headers.get("X-Antic-Deferred-Fields"));
+    const vals = Object.values(volatility);
+    const endpointVolatility = vals.filter((v) => v === "high").length > vals.length / 2 ? "high" : "low";
+    const meta = {
+      staleness,
+      reconciledId: reconcileId,
+      volatility,
+      deferredFields: this.deferredFields,
+      endpointVolatility
+    };
+    this.status = "speculative";
+    this.emit("speculative", data, meta);
+    if (!reconcileId) {
+      this.status = "confirmed";
+      this.emit("confirm");
+      return;
+    }
+    const channel = SignalChannel.getInstance(this.baseUrl, this.clientId);
+    this.unsubscribeSignal = channel.subscribe(reconcileId, (event, payload) => {
+      this.handleSignal(event, payload);
+    });
+    const effectiveWindow = Math.min(maxWindowHeader, this.maxWindow);
+    this.maxWindowTimer = setTimeout(() => {
+      this.cleanup();
+      const meta2 = {
+        reconciledId: reconcileId,
+        reason: "timeout",
+        elapsed: effectiveWindow,
+        resource: this.path
+      };
+      this.emit("speculationAbandoned", meta2);
+      if (this.onTimeout === "refetch") {
+        this.refetch();
+      } else {
+        this.emit("abort", "timeout", true);
+        this.status = "error";
+      }
+    }, effectiveWindow);
+  }
+  /** Directly re-fetch the resource (used after retryable ABORT or speculationAbandoned). */
+  async refetch() {
+    return this.fetch();
+  }
+  /** Handle a signal received from the signal channel. */
+  handleSignal(event, data) {
+    switch (event) {
+      case "patch": {
+        this.status = "patching";
+        this.emit("patch", data.ops ?? []);
+        if (this.pendingFill !== null) {
+          if (this.fillBufferTimer !== null) {
+            clearTimeout(this.fillBufferTimer);
+            this.fillBufferTimer = null;
+          }
+          this.status = "filling";
+          this.emit("fill", this.pendingFill);
+          this.pendingFill = null;
+          this.finalize();
+          return;
+        }
+        if (this.deferredFields.length === 0) {
+          this.finalize();
+        }
+        break;
+      }
+      case "fill": {
+        const fields = data.fields ?? {};
+        if (this.status === "speculative") {
+          this.pendingFill = fields;
+          this.fillBufferTimer = setTimeout(() => {
+            this.status = "filling";
+            this.emit("fill", this.pendingFill ?? {});
+            this.pendingFill = null;
+            this.finalize();
+          }, 50);
+        } else {
+          this.status = "filling";
+          this.emit("fill", fields);
+          this.finalize();
+        }
+        break;
+      }
+      case "confirm": {
+        this.emit("confirm");
+        this.finalize();
+        break;
+      }
+      case "replace": {
+        this.emit("replace", data.data ?? data);
+        this.finalize();
+        break;
+      }
+      case "abort": {
+        const reason = data.reason ?? "unknown";
+        const retryable = data.retryable ?? false;
+        this.cleanup();
+        this.status = "error";
+        this.emit("abort", reason, retryable);
+        if (retryable && this.onTimeout === "refetch" && reason !== "connection_lost") {
+          setTimeout(() => this.refetch(), 100);
+        }
+        break;
+      }
     }
   }
-  handleMutationEvent(ev, options) {
-    try {
-      const payload = ev.data ? JSON.parse(ev.data) : null;
-      switch (ev.event) {
-        case "optimistic":
-          options.onOptimistic?.(payload?.data ?? null);
-          break;
-        case "committed":
-          options.onCommitted?.(payload?.data ?? null, payload?.latency_ms ?? 0);
-          break;
-        case "reverted":
-          options.onReverted?.(payload?.reason ?? "unknown", payload?.code ?? 0, payload?.detail);
-          break;
-      }
-    } catch (err) {
-      console.error("[AnticResolver] Failed to parse mutation event:", err);
+  /** Finalize: mark as confirmed, clear timers, unsubscribe from signal channel. */
+  finalize() {
+    this.status = "confirmed";
+    this.cleanup();
+  }
+  /** Clean up all timers and subscriptions. */
+  cleanup() {
+    if (this.maxWindowTimer !== null) {
+      clearTimeout(this.maxWindowTimer);
+      this.maxWindowTimer = null;
     }
+    if (this.fillBufferTimer !== null) {
+      clearTimeout(this.fillBufferTimer);
+      this.fillBufferTimer = null;
+    }
+    if (this.unsubscribeSignal) {
+      this.unsubscribeSignal();
+      this.unsubscribeSignal = null;
+    }
+    this.pendingFill = null;
+  }
+  /** Apply RFC 6902 JSON Patch operations to a data object. Returns the patched copy. */
+  static applyPatch(data, ops) {
+    const result = { ...data };
+    for (const op of ops) {
+      const field = op.path.replace(/^\//, "");
+      if (op.op === "replace" || op.op === "add") {
+        result[field] = op.value;
+      } else if (op.op === "remove") {
+        delete result[field];
+      }
+    }
+    return result;
+  }
+  get currentStatus() {
+    return this.status;
   }
 };
 
 // src/index.ts
-var index_default = AnticResolver;
+var index_default = AnticipationResolver;
 // Annotate the CommonJS export names for ESM import in node:
 0 && (module.exports = {
-  AnticResolver,
-  SSEParser,
-  applyPatch
+  AnticipationResolver
 });
