@@ -30,7 +30,8 @@ app.use(express.static(path.join(__dirname, "../client")));
 // Two versions of each resource simulate the "cache drift" scenario:
 // the vault starts with v1 (slightly older values), the DB returns v2 (current).
 
-const dbV2 = {
+// We use a mutable state object to simulate a "live" database that trends over time.
+let liveDbState = {
   "user/1": {
     id: 1,
     name: "Alice Chen",
@@ -38,11 +39,11 @@ const dbV2 = {
     team: "Growth",
     avatar: "AC",
     projects: 12,
-    tasks_open: 3,           // Changed: was 4 (task completed since last cache)
-    tasks_done: 92,          // Changed: was 91
-    streak_days: 15,         // Changed: +1 day
+    tasks_open: 3,
+    tasks_done: 92,
+    streak_days: 15,
     last_active: "just now",
-    kpi_score: 97,           // Changed: was 95 (improved score)
+    kpi_score: 97,
   },
   "feed/1": {
     items: [
@@ -54,14 +55,14 @@ const dbV2 = {
     ],
   },
   "dashboard/1": {
-    revenue:       131200,   // Changed: was 128400
-    revenue_delta: 14.1,     // Changed: was 12.4
-    active_users:  4930,     // Changed: was 4821
-    users_delta:   9.2,      // Changed: was 8.1
-    conversion:    3.81,     // Changed: was 3.72
-    conv_delta:    0.51,     // Changed: was 0.43
-    latency_p99:   174,      // Changed: was 187 (improved)
-    latency_delta: -47,      // Changed: was -34
+    revenue:       131200,
+    revenue_delta: 14.1,
+    active_users:  4930,
+    users_delta:   9.2,
+    conversion:    3.81,
+    conv_delta:    0.51,
+    latency_p99:   174,
+    latency_delta: -47,
   },
 };
 
@@ -110,13 +111,14 @@ app.get("/api/*", async (req, res) => {
   const dbDelay = 300 + Math.floor(Math.random() * 100);
   await new Promise((r) => setTimeout(r, dbDelay));
 
-  const responseData = { ...data };
+  const responseData = JSON.parse(JSON.stringify(liveDbState[fullPath]));
   if (fullPath === "dashboard/1") {
-    // Induce drift on ~25% of requests to make the demo feel natural.
-    // Natural metrics don't jump on every single poll.
-    if (Math.random() < 0.25) {
-      const drift = (Math.random() > 0.5 ? 1 : -1) * (2000 + Math.floor(Math.random() * 6000));
-      responseData.revenue += drift;
+    // Random walk: trend revenue naturally on ~40% of requests.
+    // This avoids "toggling" by persisting the drift to liveDbState.
+    if (Math.random() < 0.4) {
+      const trend = (Math.random() > 0.5 ? 1 : -1) * (500 + Math.floor(Math.random() * 1500));
+      liveDbState["dashboard/1"].revenue += trend;
+      responseData.revenue = liveDbState["dashboard/1"].revenue;
     }
   }
 

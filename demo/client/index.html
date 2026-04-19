@@ -1149,7 +1149,8 @@
           if (meta.reconciledId) {
             logEvent('fast', `SPECULATIVE — staleness: ${meta.staleness}ms, reconcileId: ${meta.reconciledId.slice(0,14)}`, elapsed);
           } else {
-            logEvent('fast', `CONFIRMED (Cold Hit) — truth arrived directly`, elapsed);
+            // Cold hit. We skip the FAST log here and let 'confirm' handle it
+            // as a single consolidated event to match the spec.
             signalContainer.innerHTML = `<span class="signal-badge signal-confirm">✓ Confirmed</span>`;
           }
 
@@ -1228,9 +1229,15 @@
           barFormal.style.width = '100%';
           timeFormal.textContent = `Formal Track: ${formalLatency}ms`;
           display.className = 'data-display speculative confirmed';
+          
+          if (resolver.meta && !resolver.meta.reconciledId) {
+            // This was a cold hit. Exactly one log line produced.
+            logEvent('formal', `CONFIRMED (Cold Hit) — truth arrived directly`, formalLatency);
+          } else {
+            logEvent('formal', `CONFIRM — speculative was accurate`, formalLatency);
+          }
+          
           signalContainer.innerHTML = `<span class="signal-badge signal-confirm">✓ CONFIRM</span>`;
-
-          logEvent('formal', `CONFIRM — speculative was accurate`, formalLatency);
           updateViz(null, null, formalLatency);
           requestInFlight = false;
           setButtonsDisabled(false);
