@@ -11,7 +11,7 @@ vault:
 
 # ── Formal Track ─────────────────────────────────────────────────────────────
 formal_track:
-  upstream: "http://localhost:4000"   # Demo: proxy routes to the same server's /api/* routes.
+  upstream: "http://localhost:4001"   # Demo API server (npm start in demo/server).
   timeout_ms: 5000
 
 # ── Reconciliation ────────────────────────────────────────────────────────────
@@ -56,8 +56,8 @@ endpoints:
     fields:
       revenue:        { class: SPECULATIVE, volatility: high }
       revenue_delta:  { class: SPECULATIVE, volatility: high }
-      active_users:   { class: SPECULATIVE, volatility: high }
-      users_delta:    { class: SPECULATIVE, volatility: high }
+      active_users:   { class: DEFERRED,    volatility: high }
+      users_delta:    { class: DEFERRED,    volatility: high }
       conversion:     { class: SPECULATIVE, volatility: high }
       conv_delta:     { class: SPECULATIVE, volatility: high }
       latency_p99:    { class: SPECULATIVE, volatility: high }

@@ -92,7 +92,7 @@ func (h *Handler) HandleSpec(w http.ResponseWriter, r *http.Request) {
 	entry := h.vault.Get(resource, id)
 
 	// 3. Cold miss or stale → serve confirmed directly.
-	maxStaleness := h.classifier.MaxStalenessMs(r.URL.Path)
+	maxStaleness := h.classifier.MaxStalenessMs(resourcePath)
 	if entry == nil || entry.AgeMS() > int64(maxStaleness) {
 		h.serveConfirmed(w, r, resourcePath)
 		return
@@ -494,7 +494,11 @@ func parsePath(p string) (resource, id string, err error) {
 	if len(parts) < 2 {
 		return "", "", fmt.Errorf("path must be /<resource>/<id>")
 	}
-	return parts[0], parts[1], nil
+	// Resource is everything except the last part.
+	// ID is the last part.
+	id = parts[len(parts)-1]
+	resource = strings.Join(parts[:len(parts)-1], "/")
+	return resource, id, nil
 }
 
 func fieldKeys(m map[string]interface{}) []string {

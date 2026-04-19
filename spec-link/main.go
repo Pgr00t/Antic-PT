@@ -1,13 +1,19 @@
-// Spec-Link is the reference Go proxy implementation for Antic-PT v0.2.
+// Spec-Link is the reference Go proxy implementation for Antic-PT v0.2.1.
 //
 // It reads antic-pt.yaml from the working directory (or the path given by
 // the -config flag), initialises the State Vault, field classifier, and
 // signal hub, then listens for connections on the configured port.
+//
+// In demo mode (-seed flag), it also pre-warms the vault from the
+// upstream /seed/* endpoint so the first /spec/* request is always
+// a cache hit demonstrating the speculative path.
 package main
 
 import (
+	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"time"
@@ -19,6 +25,7 @@ import (
 
 func main() {
 	configPath := flag.String("config", "antic-pt.yaml", "path to configuration file")
+	seedVault := flag.Bool("seed", false, "pre-warm vault from upstream /seed/* on startup")
 	flag.Parse()
 
 	cfg, err := config.Load(*configPath)
@@ -41,6 +48,34 @@ func main() {
 		log.Printf("[spec-link] vault: memory")
 	}
 
+	// Optional: pre-warm the vault from the upstream /seed/* endpoint.
+	// This ensures the first /spec/* request is a cache hit.
+	if *seedVault {
+		seedResources := []struct{ resource, id string }{
+			{"api/user", "1"},
+			{"api/feed", "1"},
+			{"api/dashboard", "1"},
+		}
+		client := &http.Client{Timeout: 5 * time.Second}
+		for _, r := range seedResources {
+			url := fmt.Sprintf("%s/seed/%s/%s", cfg.FormalTrack.Upstream, r.resource, r.id)
+			resp, err := client.Get(url)
+			if err != nil {
+				log.Printf("[spec-link] seed: could not reach %s: %v", url, err)
+				continue
+			}
+			body, _ := io.ReadAll(resp.Body)
+			resp.Body.Close()
+			var data map[string]interface{}
+			if err := json.Unmarshal(body, &data); err != nil {
+				log.Printf("[spec-link] seed: failed to parse %s: %v", url, err)
+				continue
+			}
+			v.Set(r.resource, r.id, data)
+			log.Printf("[spec-link] seed: primed vault for %s/%s", r.resource, r.id)
+		}
+	}
+
 	// Initialise the multiplexed signal hub (GET /antic/signals).
 	hub := proxy.NewSignalHub()
 
@@ -55,19 +90,19 @@ func main() {
 	// Spec-Link dual-track endpoint.
 	mux.HandleFunc(cfg.Prefix+"/", handler.HandleSpec)
 
-	// Transparent passthrough for all other routes.
+	// Transparent passthrough for all other routes (API, static files via upstream).
 	mux.HandleFunc("/", handler.HandlePassthrough)
 
 	addr := fmt.Sprintf(":%d", cfg.Port)
 	log.Printf(`
-╔═══════════════════════════════════════════════════════╗
-║         SPEC-LINK v0.2.1 (Antic-PT)                  ║
-╠═══════════════════════════════════════════════════════╣
-║  Listening:      http://localhost%s                ║
-║  Spec prefix:    %s/*                               ║
-║  Signal channel: http://localhost%s/antic/signals  ║
-║  Upstream:       %s              ║
-╚═══════════════════════════════════════════════════════╝`,
+╔════════════════════════════════════════════════════════════╗
+║           SPEC-LINK v0.2.1 (Antic-PT)                     ║
+╠════════════════════════════════════════════════════════════╣
+║  Proxy:          http://localhost%s                    ║
+║  Spec prefix:    %s/*                                   ║
+║  Signal channel: http://localhost%s/antic/signals      ║
+║  Upstream:       %s                  ║
+╚════════════════════════════════════════════════════════════╝`,
 		addr, cfg.Prefix, addr, cfg.FormalTrack.Upstream)
 
 	srv := &http.Server{

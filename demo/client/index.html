@@ -120,6 +120,7 @@
       font-weight: 800;
       letter-spacing: -0.5px;
       background: linear-gradient(90deg, var(--cyan-400), var(--blue-400));
+      background-clip: text;
       -webkit-background-clip: text;
       -webkit-text-fill-color: transparent;
     }
@@ -188,6 +189,7 @@
     }
     .hero h1 .gradient-text {
       background: linear-gradient(135deg, var(--cyan-400) 0%, var(--blue-400) 50%, var(--violet-400) 100%);
+      background-clip: text;
       -webkit-background-clip: text;
       -webkit-text-fill-color: transparent;
     }
@@ -654,6 +656,62 @@
     .header-meta-pill .pill-val { color: var(--text-secondary); }
     .pill-deferred .pill-key { color: var(--amber-400); }
     .pill-staleness .pill-key { color: var(--violet-400); }
+    /* ── Animations ── */
+    @keyframes skeleton-pulse {
+      0% { background: rgba(99, 179, 237, 0.05); }
+      50% { background: rgba(99, 179, 237, 0.15); }
+      100% { background: rgba(99, 179, 237, 0.05); }
+    }
+    .skeleton-box {
+      display: inline-block;
+      height: 1em;
+      width: 60px;
+      vertical-align: middle;
+      border-radius: 4px;
+      animation: skeleton-pulse 1.5s ease-in-out infinite;
+      position: relative;
+      overflow: hidden;
+    }
+    .skeleton-box::after {
+      content: "";
+      position: absolute;
+      top: 0; right: 0; bottom: 0; left: 0;
+      transform: translateX(-100%);
+      background: linear-gradient(90deg, transparent, rgba(255,255,255,0.05), transparent);
+      animation: skeleton-shimmer 2s infinite;
+    }
+    @keyframes skeleton-shimmer {
+      100% { transform: translateX(100%); }
+    }
+
+    @keyframes patch-flash {
+      0% { background: rgba(59, 130, 246, 0.6); transform: scale(1.1); box-shadow: 0 0 20px rgba(59, 130, 246, 0.5); }
+      100% { background: transparent; transform: scale(1); box-shadow: 0 0 0 transparent; }
+    }
+    .field-updated {
+      animation: patch-flash 1s ease-out forwards;
+      display: inline-block;
+      border-radius: 4px;
+      padding: 0 4px;
+      margin: 0 -4px;
+      font-weight: 700;
+      color: var(--blue-400);
+    }
+
+    @keyframes fill-flash {
+      0% { background: rgba(167, 139, 250, 0.6); transform: translateY(-2px); box-shadow: 0 0 20px rgba(167, 139, 250, 0.5); }
+      100% { background: transparent; transform: translateY(0); box-shadow: 0 0 0 transparent; }
+    }
+    .field-filled {
+      animation: fill-flash 1s ease-out forwards;
+      display: inline-block;
+      border-radius: 4px;
+      padding: 0 4px;
+      margin: 0 -4px;
+      font-weight: 700;
+      color: var(--violet-400);
+    }
+
     /* ── Footer ── */
     footer {
       text-align: center;
@@ -917,17 +975,19 @@
     // ─── Render data ──────────────────────────────────────────────────────
     function renderData(containerId, resource, data, deferredFields) {
       const el = document.getElementById(containerId);
-      const deferred = new Set(deferredFields || []);
-      // Helper: render a value or ⏳ pending pill for null/deferred fields
+      
       const val = (key, suffix = '') => {
         const v = data[key];
+        const id = `${containerId}-${key}`;
+        
         if (v === null || v === undefined) {
-          return `<span style="color:var(--amber-400);font-size:11px">⏳ pending</span>`;
+          return `<span class="skeleton-box" style="width:${Math.random()*40 + 40}px" id="${id}"></span>`;
         }
-        return `${v}${suffix}`;
+        
+        return `<span id="${id}">${v}${suffix}</span>`;
       };
-      let html = '';
 
+      let html = '';
       if (resource === 'user') {
         html = `
           <div class="user-card">
@@ -983,7 +1043,6 @@
           </div>
         </div>`;
       }
-
       el.innerHTML = html;
     }
 
@@ -1069,8 +1128,8 @@
       let formalLatency = null;
 
       const resolver = new AnticipationResolver(
-        `${BASE}/spec/${currentResource}/${currentId}`,
-        { baseUrl: '', maxWindow: 3000, onTimeout: 'refetch' }
+        `/spec/api/${currentResource}/${currentId}`,
+        { baseUrl: BASE, maxWindow: 3000, onTimeout: 'refetch' }
       );
 
       resolver
@@ -1086,7 +1145,13 @@
           renderData('display-antic', currentResource, data, meta.deferredFields);
 
           signalContainer.innerHTML = `<span class="signal-badge signal-speculative">⚡ Speculative</span>`;
-          logEvent('fast', `SPECULATIVE — staleness: ${meta.staleness}ms, reconcileId: ${meta.reconciledId?.slice(0,14)}`, elapsed);
+          
+          if (meta.reconciledId) {
+            logEvent('fast', `SPECULATIVE — staleness: ${meta.staleness}ms, reconcileId: ${meta.reconciledId.slice(0,14)}`, elapsed);
+          } else {
+            logEvent('fast', `CONFIRMED (Cold Hit) — truth arrived directly`, elapsed);
+            signalContainer.innerHTML = `<span class="signal-badge signal-confirm">✓ Confirmed</span>`;
+          }
 
           if (meta.deferredFields.length > 0) {
             logEvent('system', `DEFERRED fields withheld: ${meta.deferredFields.join(', ')}`);
@@ -1106,14 +1171,29 @@
           display.className = 'data-display speculative patched';
           signalContainer.innerHTML = `<span class="signal-badge signal-patch">△ PATCH</span>`;
 
-          logEvent('formal', `PATCH — ${ops.length} RFC 6902 op(s): ${ops.map(o => o.path).join(', ')}`, formalLatency);
+          const changes = ops.map(o => {
+            const field = o.path.slice(1);
+            const prev = speculativeState[field];
+            return `${field}: ${prev} → ${o.value}`;
+          }).join(', ');
+          
+          logEvent('formal', `PATCH — corrected: ${changes}`, formalLatency);
 
           if (speculativeState) {
             speculativeState = AnticipationResolver.applyPatch(speculativeState, ops);
             renderData('display-antic', currentResource, speculativeState, []);
+            
+            // Trigger flash animation on patched fields
+            ops.forEach(op => {
+              const field = op.path.slice(1); // remove leading slash
+              const el = document.getElementById(`display-antic-${field}`);
+              if (el) {
+                el.classList.add('field-updated');
+                setTimeout(() => el.classList.remove('field-updated'), 1000);
+              }
+            });
           }
           updateViz(null, null, formalLatency);
-          // Wait for possible FILL before releasing buttons
         })
 
         .on('fill', (fields) => {
@@ -1128,6 +1208,15 @@
           if (speculativeState) {
             speculativeState = { ...speculativeState, ...fields };
             renderData('display-antic', currentResource, speculativeState, []);
+            
+            // Trigger flash animation on filled fields
+            Object.keys(fields).forEach(field => {
+              const el = document.getElementById(`display-antic-${field}`);
+              if (el) {
+                el.classList.add('field-filled');
+                setTimeout(() => el.classList.remove('field-filled'), 1500);
+              }
+            });
           }
           updateViz(null, null, formalLatency);
           requestInFlight = false;
