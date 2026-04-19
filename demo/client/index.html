@@ -626,6 +626,34 @@
     .speed-bar { height: 100%; border-radius: 6px; transition: width 0.8s cubic-bezier(0.22, 1, 0.36, 1); }
     .speed-val { font-family: 'JetBrains Mono', monospace; font-size: 12px; font-weight: 600; min-width: 60px; text-align: right; }
 
+    /* ── Header metadata pill ── */
+    .header-meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      padding: 10px 16px;
+      background: rgba(8, 12, 20, 0.7);
+      border-top: 1px solid var(--border);
+      border-radius: 0 0 var(--radius-md) var(--radius-md);
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 10px;
+      min-height: 38px;
+      align-items: center;
+    }
+    .header-meta-pill {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      background: rgba(255,255,255,0.04);
+      border: 1px solid var(--border);
+      border-radius: 5px;
+      padding: 3px 8px;
+      color: var(--text-muted);
+    }
+    .header-meta-pill .pill-key { color: var(--cyan-400); font-weight: 600; }
+    .header-meta-pill .pill-val { color: var(--text-secondary); }
+    .pill-deferred .pill-key { color: var(--amber-400); }
+    .pill-staleness .pill-key { color: var(--violet-400); }
     /* ── Footer ── */
     footer {
       text-align: center;
@@ -658,7 +686,7 @@
       <div class="logo">
         <div class="logo-icon">⚡</div>
         <span class="logo-text">Antic-PT</span>
-        <span class="logo-version">v0.2 Demo</span>
+        <span class="logo-version">v0.2.1 Demo</span>
       </div>
       <div class="header-badge">
         <span class="status-dot"></span>
@@ -786,6 +814,10 @@
               <div class="data-placeholder">⚡ Hit the button to fetch</div>
             </div>
           </div>
+          <!-- X-Antic-* header metadata display -->
+          <div class="header-meta" id="antic-headers">
+            <span style="color:var(--text-muted);font-size:10px">X-Antic-* headers will appear here after a request</span>
+          </div>
         </div>
       </div>
 
@@ -836,7 +868,7 @@
     </main>
 
     <footer>
-      <p>ANTIC-PT v0.2 Demo — Open Protocol · MIT License · <a href="#">Read the Spec →</a></p>
+      <p>ANTIC-PT v0.2.1 — Open Protocol · MIT License · <a href="https://github.com/Pgr00t/Antic-PT/blob/main/ANTIC-PT-SPEC.md" target="_blank">Read the Spec →</a></p>
     </footer>
   </div>
 
@@ -847,7 +879,9 @@
     let currentResource = 'user';
     let currentId = '1';
     let requestInFlight = false;
+    let speculativeState = null; // holds current data for patch application
 
+    const { AnticipationResolver } = AnticPT;
     const TYPE_ICONS = { code: '💻', design: '🎨', deploy: '🚀', plan: '📋' };
 
     // ─── Resource selector ───────────────────────────────────────────────
@@ -881,8 +915,17 @@
     }
 
     // ─── Render data ──────────────────────────────────────────────────────
-    function renderData(containerId, resource, data) {
+    function renderData(containerId, resource, data, deferredFields) {
       const el = document.getElementById(containerId);
+      const deferred = new Set(deferredFields || []);
+      // Helper: render a value or ⏳ pending pill for null/deferred fields
+      const val = (key, suffix = '') => {
+        const v = data[key];
+        if (v === null || v === undefined) {
+          return `<span style="color:var(--amber-400);font-size:11px">⏳ pending</span>`;
+        }
+        return `${v}${suffix}`;
+      };
       let html = '';
 
       if (resource === 'user') {
@@ -890,21 +933,21 @@
           <div class="user-card">
             <div class="avatar">${data.avatar || data.name?.slice(0,2) || 'U'}</div>
             <div>
-              <div class="user-info-name">${data.name}</div>
-              <div class="user-info-role">${data.role} · ${data.team}</div>
+              <div class="user-info-name">${val('name')}</div>
+              <div class="user-info-role">${val('role')} · ${val('team')}</div>
             </div>
           </div>
           <div class="user-stats">
             <div class="user-stat">
-              <div class="user-stat-val">${data.streak_days}</div>
+              <div class="user-stat-val">${val('streak_days')}</div>
               <div class="user-stat-lbl">Day Streak</div>
             </div>
             <div class="user-stat">
-              <div class="user-stat-val">${data.tasks_done}</div>
+              <div class="user-stat-val">${val('tasks_done')}</div>
               <div class="user-stat-lbl">Tasks Done</div>
             </div>
             <div class="user-stat">
-              <div class="user-stat-val">${data.kpi_score}</div>
+              <div class="user-stat-val">${val('kpi_score')}</div>
               <div class="user-stat-lbl">KPI Score</div>
             </div>
           </div>`;
@@ -920,23 +963,23 @@
         html = `<div class="dash-grid">
           <div class="dash-metric">
             <div class="dash-lbl">Revenue</div>
-            <div class="dash-val">$${(data.revenue/1000).toFixed(1)}k</div>
-            <div class="dash-delta delta-up">▲ ${data.revenue_delta}%</div>
+            <div class="dash-val">${data.revenue != null ? '$'+(data.revenue/1000).toFixed(1)+'k' : val('revenue')}</div>
+            <div class="dash-delta delta-up">▲ ${val('revenue_delta','%')}</div>
           </div>
           <div class="dash-metric">
             <div class="dash-lbl">Active Users</div>
-            <div class="dash-val">${data.active_users.toLocaleString()}</div>
-            <div class="dash-delta delta-up">▲ ${data.users_delta}%</div>
+            <div class="dash-val">${data.active_users != null ? data.active_users.toLocaleString() : val('active_users')}</div>
+            <div class="dash-delta delta-up">▲ ${val('users_delta','%')}</div>
           </div>
           <div class="dash-metric">
             <div class="dash-lbl">Conversion</div>
-            <div class="dash-val">${data.conversion}%</div>
-            <div class="dash-delta delta-up">▲ ${data.conv_delta}%</div>
+            <div class="dash-val">${val('conversion','%')}</div>
+            <div class="dash-delta delta-up">▲ ${val('conv_delta','%')}</div>
           </div>
           <div class="dash-metric">
             <div class="dash-lbl">P99 Latency</div>
-            <div class="dash-val">${data.latency_p99}ms</div>
-            <div class="dash-delta delta-up">▼ ${Math.abs(data.latency_delta)}ms</div>
+            <div class="dash-val">${val('latency_p99','ms')}</div>
+            <div class="dash-delta delta-up">▼ ${data.latency_delta != null ? Math.abs(data.latency_delta)+'ms' : val('latency_delta')}</div>
           </div>
         </div>`;
       }
@@ -992,7 +1035,7 @@
       setButtonsDisabled(false);
     }
 
-    // ─── Antic-PT Fetch ───────────────────────────────────────────────────
+    // ─── Antic-PT Fetch (v0.2.1 SDK) ─────────────────────────────────────
     function fetchAntic() {
       if (requestInFlight) return;
       requestInFlight = true;
@@ -1005,6 +1048,7 @@
       const timeFast = document.getElementById('time-fast');
       const timeFormal = document.getElementById('time-formal');
       const signalContainer = document.getElementById('signal-badge-container');
+      const headersEl = document.getElementById('antic-headers');
 
       display.className = 'data-display loading';
       display.innerHTML = '<div class="data-placeholder">⚡ Forking tracks...</div>';
@@ -1015,98 +1059,154 @@
       timeFast.textContent = 'Fast Track running...';
       timeFormal.textContent = 'Formal Track running...';
       signalContainer.innerHTML = '';
+      headersEl.innerHTML = '<span style="color:var(--text-muted);font-size:10px">Waiting for response headers...</span>';
+      speculativeState = null;
 
-      logEvent('system', `⚡ Antic-PT fork: /spec/${currentResource}/${currentId}`);
+      logEvent('system', `⚡ Antic-PT v0.2.1 fork: /spec/${currentResource}/${currentId}`);
 
       const start = performance.now();
       let fastTrackDone = false;
       let formalLatency = null;
-      let speculativeData = null;
 
-      const resolver = new AnticPT.AnticResolver(BASE);
-      
-      resolver.fetch(`/spec/${currentResource}/${currentId}`, {
-        intent: 'auto',
-        onSpeculative: (data, meta) => {
+      const resolver = new AnticipationResolver(
+        `${BASE}/spec/${currentResource}/${currentId}`,
+        { baseUrl: '', maxWindow: 3000, onTimeout: 'refetch' }
+      );
+
+      resolver
+        .on('speculative', (data, meta) => {
           const elapsed = Math.round(performance.now() - start);
-          speculativeData = data;
-          
+          speculativeState = data;
+
           barFast.style.width = '100%';
           timeFast.textContent = `Fast Track: ${elapsed}ms`;
           latencyEl.textContent = `${elapsed}ms`;
           latencyEl.className = 'panel-latency latency-antic';
           display.className = 'data-display speculative';
-          renderData('display-antic', currentResource, data);
+          renderData('display-antic', currentResource, data, meta.deferredFields);
 
           signalContainer.innerHTML = `<span class="signal-badge signal-speculative">⚡ Speculative</span>`;
-          logEvent('fast', `speculative event (v${meta.version}, age ${meta.age_ms}ms)`, elapsed);
-          fastTrackDone = true;
+          logEvent('fast', `SPECULATIVE — staleness: ${meta.staleness}ms, reconcileId: ${meta.reconciledId?.slice(0,14)}`, elapsed);
 
+          if (meta.deferredFields.length > 0) {
+            logEvent('system', `DEFERRED fields withheld: ${meta.deferredFields.join(', ')}`);
+          }
+          fastTrackDone = true;
           updateStats(null, elapsed, null);
           updateViz(null, elapsed, null);
-        },
-        onConfirm: (version) => {
-          const elapsed = Math.round(performance.now() - start);
-          display.className = 'data-display speculative confirmed';
-          signalContainer.innerHTML = `<span class="signal-badge signal-confirm">✓ Confirmed</span>`;
 
-          logEvent('formal', `CONFIRM — speculative was accurate (v${version})`, formalLatency);
-          updateViz(null, null, formalLatency);
-          requestInFlight = false;
-          setButtonsDisabled(false);
-        },
-        onPatch: (ops) => {
-          const elapsed = Math.round(performance.now() - start);
+          // Render X-Antic-* header pills
+          renderHeaderMeta(headersEl, meta);
+        })
+
+        .on('patch', (ops) => {
+          formalLatency = Math.round(performance.now() - start);
+          barFormal.style.width = '100%';
+          timeFormal.textContent = `Formal Track: ${formalLatency}ms`;
           display.className = 'data-display speculative patched';
-          signalContainer.innerHTML = `<span class="signal-badge signal-patch">△ Patched</span>`;
+          signalContainer.innerHTML = `<span class="signal-badge signal-patch">△ PATCH</span>`;
 
-          logEvent('formal', `PATCH — ${ops.length || 0} field(s) updated`, formalLatency);
-          logEvent('system', `Applying patch: ${ops.map(o => o.path).join(', ')}`);
+          logEvent('formal', `PATCH — ${ops.length} RFC 6902 op(s): ${ops.map(o => o.path).join(', ')}`, formalLatency);
 
-          // Apply patch using the SDK's reconciler
-          if (speculativeData) {
-            speculativeData = AnticPT.AnticResolver.reconcile(speculativeData, ops);
-            renderData('display-antic', currentResource, speculativeData);
+          if (speculativeState) {
+            speculativeState = AnticipationResolver.applyPatch(speculativeState, ops);
+            renderData('display-antic', currentResource, speculativeState, []);
           }
-          
+          updateViz(null, null, formalLatency);
+          // Wait for possible FILL before releasing buttons
+        })
+
+        .on('fill', (fields) => {
+          if (!formalLatency) formalLatency = Math.round(performance.now() - start);
+          barFormal.style.width = '100%';
+          timeFormal.textContent = `Formal Track: ${formalLatency}ms`;
+          display.className = 'data-display speculative confirmed';
+          signalContainer.innerHTML = `<span class="signal-badge signal-confirm">⬇ FILL</span>`;
+
+          logEvent('formal', `FILL — deferred fields delivered: ${Object.keys(fields).join(', ')}`, formalLatency);
+
+          if (speculativeState) {
+            speculativeState = { ...speculativeState, ...fields };
+            renderData('display-antic', currentResource, speculativeState, []);
+          }
           updateViz(null, null, formalLatency);
           requestInFlight = false;
           setButtonsDisabled(false);
-        },
-        onReplace: (data) => {
-          const meta = data._antic || {};
-          const elapsed = Math.round(performance.now() - start);
-          formalLatency = meta.formal_track_latency_ms || elapsed;
-          delete data._antic;
+        })
 
+        .on('confirm', () => {
+          formalLatency = Math.round(performance.now() - start);
+          barFormal.style.width = '100%';
+          timeFormal.textContent = `Formal Track: ${formalLatency}ms`;
+          display.className = 'data-display speculative confirmed';
+          signalContainer.innerHTML = `<span class="signal-badge signal-confirm">✓ CONFIRM</span>`;
+
+          logEvent('formal', `CONFIRM — speculative was accurate`, formalLatency);
+          updateViz(null, null, formalLatency);
+          requestInFlight = false;
+          setButtonsDisabled(false);
+        })
+
+        .on('replace', (data) => {
+          formalLatency = Math.round(performance.now() - start);
+          speculativeState = data;
           barFormal.style.width = '100%';
           timeFormal.textContent = `Formal Track: ${formalLatency}ms`;
           display.className = 'data-display';
-          renderData('display-antic', currentResource, data);
-          signalContainer.innerHTML = `<span class="signal-badge signal-replace">↺ Replaced</span>`;
+          renderData('display-antic', currentResource, data, []);
+          signalContainer.innerHTML = `<span class="signal-badge signal-replace">↺ REPLACE</span>`;
 
           if (!fastTrackDone) {
             const perceived = Math.round(performance.now() - start);
             latencyEl.textContent = `${perceived}ms`;
             latencyEl.className = 'panel-latency latency-antic';
-            logEvent('formal', `REPLACE (cache miss) — full data from DB`, perceived);
+            logEvent('formal', `REPLACE (cold vault) — confirmed response served`, perceived);
           } else {
-            logEvent('formal', `REPLACE — data changed significantly`, formalLatency);
+            logEvent('formal', `REPLACE — ≥ replace_threshold fields diverged`, formalLatency);
           }
           updateViz(null, null, formalLatency);
           requestInFlight = false;
           setButtonsDisabled(false);
-        },
-        onAbort: (reason, code) => {
-          logEvent('formal', `ABORT — ${reason} (code ${code || '?'})`);
+        })
+
+        .on('abort', (reason, retryable) => {
+          logEvent('formal', `ABORT — reason: ${reason}, retryable: ${retryable}`);
           display.innerHTML = `<div class="data-placeholder" style="color:var(--rose-400)">❌ ${reason}</div>`;
-          signalContainer.innerHTML = `<span class="signal-badge signal-abort">✕ Aborted</span>`;
+          signalContainer.innerHTML = `<span class="signal-badge signal-abort">✕ ABORT</span>`;
           requestInFlight = false;
           setButtonsDisabled(false);
-        }
-      });
+        })
 
+        .on('speculationAbandoned', (meta) => {
+          logEvent('system', `⚠ speculationAbandoned — reason: ${meta.reason}, elapsed: ${meta.elapsed}ms`);
+        });
+
+      resolver.fetch();
       animateBar(barFormal, 0, 90, 400);
+    }
+
+    // ─── Render X-Antic-* header pills ───────────────────────────────────
+    function renderHeaderMeta(el, meta) {
+      const pills = [
+        { key: 'X-Antic-State', val: 'speculative', cls: '' },
+        { key: 'X-Antic-Staleness', val: `${meta.staleness}ms`, cls: 'pill-staleness' },
+        { key: 'X-Antic-Max-Window', val: '3000ms', cls: '' },
+      ];
+
+      const volEntries = Object.entries(meta.volatility || {});
+      if (volEntries.length > 0) {
+        pills.push({ key: 'X-Antic-Volatility', val: volEntries.map(([k,v]) => `${k}=${v}`).join(', '), cls: '' });
+      }
+      if (meta.deferredFields && meta.deferredFields.length > 0) {
+        pills.push({ key: 'X-Antic-Deferred-Fields', val: meta.deferredFields.join(', '), cls: 'pill-deferred' });
+      }
+
+      el.innerHTML = pills.map(p =>
+        `<span class="header-meta-pill ${p.cls}">
+           <span class="pill-key">${p.key}:</span>
+           <span class="pill-val">${p.val}</span>
+         </span>`
+      ).join('');
     }
 
     // ─── Helpers ──────────────────────────────────────────────────────────

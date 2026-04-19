@@ -1,3 +1,4 @@
+/// <reference types="vitest/globals" />
 /**
  * Antic-PT v0.2 SDK — Unit Tests
  *
