@@ -1122,6 +1122,7 @@
       speculativeState = null;
 
       logEvent('system', `⚡ Antic-PT v0.2.1 fork: /spec/${currentResource}/${currentId}`);
+      logEvent('system', `Checking state vault for speculative hit...`);
 
       const start = performance.now();
       let fastTrackDone = false;
@@ -1231,8 +1232,8 @@
           display.className = 'data-display speculative confirmed';
           
           if (resolver.meta && !resolver.meta.reconciledId) {
-            // This was a cold hit. Exactly one log line produced.
-            logEvent('formal', `CONFIRMED (Cold Hit) — truth arrived directly`, formalLatency);
+            // This was a cold hit. Exactly one log line produced in Formal track.
+            logEvent('formal', `CONFIRMED (Cold Hit) — truth arrived directly from upstream`, formalLatency);
           } else {
             logEvent('formal', `CONFIRM — speculative was accurate`, formalLatency);
           }

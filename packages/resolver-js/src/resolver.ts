@@ -230,6 +230,7 @@ export class AnticipationResolver {
 
   private handlers: Handlers = {};
   private status: ResolverStatus = 'idle';
+  public meta: ResolverMeta | null = null;
 
   // State for FILL-before-PATCH buffering (spec §9.4, §11.6)
   private pendingFill: Record<string, any> | null = null;
@@ -299,7 +300,7 @@ export class AnticipationResolver {
 
     // ── Confirmed (cold miss / stale) — no signal forthcoming ────────────────
     if (state === 'confirmed' || !state) {
-      const meta: ResolverMeta = {
+      this.meta = {
         staleness: 0,
         reconciledId: '',
         volatility: {},
@@ -307,7 +308,7 @@ export class AnticipationResolver {
         endpointVolatility: 'low',
       };
       this.status = 'confirmed';
-      this.emit('speculative', data, meta);
+      this.emit('speculative', data, this.meta);
       this.emit('confirm');
       return;
     }
@@ -323,7 +324,7 @@ export class AnticipationResolver {
     const vals = Object.values(volatility);
     const endpointVolatility = (vals.filter(v => v === 'high').length > vals.length / 2 ? 'high' : 'low') as VolatilityLevel;
 
-    const meta: ResolverMeta = {
+    this.meta = {
       staleness,
       reconciledId: reconcileId,
       volatility,
@@ -332,7 +333,7 @@ export class AnticipationResolver {
     };
 
     this.status = 'speculative';
-    this.emit('speculative', data, meta);
+    this.emit('speculative', data, this.meta);
 
     if (!reconcileId) {
       // No Reconcile ID — cannot receive signals. Treat as confirmed.

@@ -105,7 +105,7 @@ const dbV1 = {
 // ── Standard REST API ─────────────────────────────────────────────────────────
 app.get("/api/*", async (req, res) => {
   const fullPath = req.params[0]; // e.g., "user/1"
-  const data = dbV2[fullPath];
+  const data = liveDbState[fullPath];
   if (!data) return res.status(404).json({ error: "Not found: " + fullPath });
 
   const dbDelay = 300 + Math.floor(Math.random() * 100);
