@@ -1,29 +1,72 @@
-# Antic-PT Spec-Link Configuration
+# Antic-PT v0.2.1 — Spec-Link Proxy Configuration
 
 port: 4000
-prefix: "/spec"
+prefix: "/spec"       # Requests under this prefix trigger Antic-PT logic.
 
+# ── State Vault ───────────────────────────────────────────────────────────────
 vault:
-  driver: "memory"       # "memory" or "redis"
-  # url: "redis://localhost:6379"   # Required when driver is "redis".
-  #                                 # Also accepts: redis://<user>:<pass>@<host>:<port>/<db>
-  #                                 # DragonflyDB works as a drop-in replacement.
-  default_ttl_ms: 30000            # Vault entries expire after this many ms.
+  driver: "memory"      # "memory" or "redis"
+  # url: "redis://localhost:6379"  # Required when driver is "redis".
+  default_ttl_ms: 30000 # Vault entries older than this are treated as cold misses.
 
-intent:
-  mode: "auto"           # "auto", "guided", or "bypass"
-  ai_confidence_threshold: 0.75
-
+# ── Formal Track ─────────────────────────────────────────────────────────────
 formal_track:
-  # Upstream points to your actual backend.
-  # Set to "embedded" for demo mode, which spawns a built-in mock API.
-  upstream: "embedded"
+  upstream: "http://localhost:4000"   # Demo: proxy routes to the same server's /api/* routes.
   timeout_ms: 5000
 
+# ── Reconciliation ────────────────────────────────────────────────────────────
 reconciliation:
-  strategy: "patch"      # "patch" or "replace"
+  strategy: "patch"   # "patch" uses RFC 6902 ops; "replace" always sends full payload.
 
-mutations:
-  enabled: true                   # Set false to keep the proxy read-only.
-  # body_limit_bytes: 1048576     # 1MB (industry default). Override if needed.
-  conflict_policy: "server-wins"  # Server response is always sent to client on committed.
+# ── Endpoint Field Classification ─────────────────────────────────────────────
+# Each endpoint declares:
+#   path             - URL pattern supporting :param wildcards
+#   volatility       - endpoint-level fallback volatility ("high", "low", "invariant")
+#   max_staleness_ms - reject vault entry older than this (safe: serve confirmed only)
+#   replace_threshold - fraction of changed SPECULATIVE fields that triggers REPLACE (0.0–1.0)
+#   default_class    - class for unlisted fields: "SPECULATIVE" (fast) or "DEFERRED" (safe)
+#   fields           - per-field explicit class and optional volatility override
+#
+# WARNING: Fields not listed inherit default_class. For financial or alarm endpoints,
+# set default_class: DEFERRED to prevent unclassified new fields from being speculated.
+endpoints:
+  - path: /api/user/:id
+    volatility: low
+    max_staleness_ms: 10000
+    replace_threshold: 0.5
+    default_class: SPECULATIVE
+    fields:
+      id:         { class: INVARIANT,   volatility: invariant }
+      name:       { class: SPECULATIVE, volatility: low }
+      role:       { class: SPECULATIVE, volatility: low }
+      team:       { class: SPECULATIVE, volatility: low }
+      avatar:     { class: SPECULATIVE, volatility: invariant }
+      kpi_score:  { class: SPECULATIVE, volatility: high }
+      last_active: { class: SPECULATIVE, volatility: high }
+      tasks_open: { class: SPECULATIVE, volatility: high }
+      tasks_done: { class: SPECULATIVE, volatility: high }
+      streak_days: { class: SPECULATIVE, volatility: low }
+      projects:   { class: SPECULATIVE, volatility: low }
+
+  - path: /api/dashboard/:id
+    volatility: high
+    max_staleness_ms: 2000
+    replace_threshold: 0.4
+    default_class: SPECULATIVE
+    fields:
+      revenue:        { class: SPECULATIVE, volatility: high }
+      revenue_delta:  { class: SPECULATIVE, volatility: high }
+      active_users:   { class: SPECULATIVE, volatility: high }
+      users_delta:    { class: SPECULATIVE, volatility: high }
+      conversion:     { class: SPECULATIVE, volatility: high }
+      conv_delta:     { class: SPECULATIVE, volatility: high }
+      latency_p99:    { class: SPECULATIVE, volatility: high }
+      latency_delta:  { class: SPECULATIVE, volatility: high }
+
+  - path: /api/feed/:id
+    volatility: high
+    max_staleness_ms: 3000
+    replace_threshold: 0.3
+    default_class: SPECULATIVE
+    fields:
+      items: { class: SPECULATIVE, volatility: high }

@@ -16,14 +16,12 @@ type SpecLinkConfig struct {
 	Prefix string `yaml:"prefix"`
 	// Vault contains configuration for the State-Vault backing store.
 	Vault VaultConfig `yaml:"vault"`
-	// Intent contains configuration for request classification.
-	Intent IntentConfig `yaml:"intent"`
 	// FormalTrack contains configuration for the authoritative upstream API.
 	FormalTrack FormalTrackConfig `yaml:"formal_track"`
 	// Reconcile contains configuration for track reconciliation strategies.
 	Reconcile ReconcileConfig `yaml:"reconciliation"`
-	// Mutations controls write-operation (POST/PUT/PATCH/DELETE) behaviour.
-	Mutations MutationsConfig `yaml:"mutations"`
+	// Endpoints lists per-endpoint field classification and behaviour configuration.
+	Endpoints []EndpointConfig `yaml:"endpoints"`
 }
 
 // VaultConfig defines the connection and behaviour settings for the State-Vault.
@@ -34,14 +32,6 @@ type VaultConfig struct {
 	URL string `yaml:"url"`
 	// DefaultTTL is the default time-to-live for vault entries in milliseconds.
 	DefaultTTL int `yaml:"default_ttl_ms"`
-}
-
-// IntentConfig defines how incoming requests are classified for speculation.
-type IntentConfig struct {
-	// Mode specifies the default classification mode ("auto", "guided", "bypass").
-	Mode string `yaml:"mode"`
-	// AIConfidenceThresh is the minimum confidence score required for auto-speculation.
-	AIConfidenceThresh float64 `yaml:"ai_confidence_threshold"`
 }
 
 // FormalTrackConfig defines the behaviour of the authoritative execution track.
@@ -58,15 +48,34 @@ type ReconcileConfig struct {
 	Strategy string `yaml:"strategy"`
 }
 
-// MutationsConfig controls write-operation behaviour in the proxy.
-type MutationsConfig struct {
-	// Enabled controls whether POST/PUT/PATCH/DELETE are proxied optimistically.
-	Enabled bool `yaml:"enabled"`
-	// BodyLimitBytes is the maximum accepted request body size for mutations (default: 1MB).
-	BodyLimitBytes int64 `yaml:"body_limit_bytes"`
-	// ConflictPolicy controls what happens when the server response differs from the client payload.
-	// "server-wins" (default): always send the real server response to the client on committed.
-	ConflictPolicy string `yaml:"conflict_policy"`
+// EndpointConfig declares field-level classification and behaviour for a single API endpoint.
+// Path supports :param wildcards (e.g. /api/servers/:id).
+type EndpointConfig struct {
+	// Path is the URL path pattern this configuration applies to.
+	Path string `yaml:"path"`
+	// Volatility is the endpoint-level default volatility hint for unlisted fields.
+	// Values: "high", "low", "invariant". Default: "low".
+	Volatility string `yaml:"volatility"`
+	// MaxStalenessMs is the maximum vault entry age (ms) before the Fast Track is skipped.
+	MaxStalenessMs int `yaml:"max_staleness_ms"`
+	// ReplaceThreshold is the fraction of changed SPECULATIVE fields that triggers REPLACE.
+	// Range: 0.0–1.0. Default: 0.5.
+	ReplaceThreshold float64 `yaml:"replace_threshold"`
+	// DefaultClass is the fallback certainty class for fields not explicitly listed.
+	// Values: "SPECULATIVE", "DEFERRED". Default: "SPECULATIVE".
+	DefaultClass string `yaml:"default_class"`
+	// Fields maps field names to their explicit certainty class and volatility.
+	Fields map[string]FieldConfig `yaml:"fields"`
+}
+
+// FieldConfig declares the certainty class and optional volatility hint for a single field.
+type FieldConfig struct {
+	// Class is the certainty class for this field.
+	// Values: "SPECULATIVE", "DEFERRED", "INVARIANT", "PROVISIONAL".
+	Class string `yaml:"class"`
+	// Volatility overrides the endpoint-level volatility for this specific field.
+	// Values: "high", "low", "invariant".
+	Volatility string `yaml:"volatility"`
 }
 
 // FormalTrackTimeout returns the upstream timeout as a time.Duration.
@@ -74,8 +83,7 @@ func (c *SpecLinkConfig) FormalTrackTimeout() time.Duration {
 	return time.Duration(c.FormalTrack.TimeoutMS) * time.Millisecond
 }
 
-// Load reads and parses a configuration file from the disk.
-// It applies sensible defaults for missing fields.
+// Load reads and parses a configuration file from the disk and applies sensible defaults.
 func Load(path string) (*SpecLinkConfig, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -87,37 +95,54 @@ func Load(path string) (*SpecLinkConfig, error) {
 		return nil, err
 	}
 
-	// Apply sensible defaults
+	// Proxy defaults
 	if cfg.Port == 0 {
 		cfg.Port = 4000
 	}
 	if cfg.Prefix == "" {
 		cfg.Prefix = "/spec"
 	}
+
+	// Vault defaults
 	if cfg.Vault.Driver == "" {
 		cfg.Vault.Driver = "memory"
 	}
 	if cfg.Vault.DefaultTTL == 0 {
 		cfg.Vault.DefaultTTL = 30_000
 	}
-	if cfg.Intent.Mode == "" {
-		cfg.Intent.Mode = "auto"
-	}
-	if cfg.Intent.AIConfidenceThresh == 0 {
-		cfg.Intent.AIConfidenceThresh = 0.75
-	}
+
+	// Formal track defaults
 	if cfg.FormalTrack.TimeoutMS == 0 {
 		cfg.FormalTrack.TimeoutMS = 5000
 	}
+
+	// Reconciliation defaults
 	if cfg.Reconcile.Strategy == "" {
 		cfg.Reconcile.Strategy = "patch"
 	}
-	// Mutations defaults
-	if cfg.Mutations.BodyLimitBytes == 0 {
-		cfg.Mutations.BodyLimitBytes = 1 << 20 // 1MB — nginx/industry standard
-	}
-	if cfg.Mutations.ConflictPolicy == "" {
-		cfg.Mutations.ConflictPolicy = "server-wins"
+
+	// Endpoint defaults
+	for i := range cfg.Endpoints {
+		ep := &cfg.Endpoints[i]
+		if ep.Volatility == "" {
+			ep.Volatility = "low"
+		}
+		if ep.MaxStalenessMs == 0 {
+			ep.MaxStalenessMs = 5000
+		}
+		if ep.ReplaceThreshold == 0 {
+			ep.ReplaceThreshold = 0.5
+		}
+		if ep.DefaultClass == "" {
+			ep.DefaultClass = "SPECULATIVE"
+		}
+		// Inherit endpoint volatility to any field that did not declare its own.
+		for name, fc := range ep.Fields {
+			if fc.Volatility == "" {
+				fc.Volatility = ep.Volatility
+				ep.Fields[name] = fc
+			}
+		}
 	}
 
 	return &cfg, nil
