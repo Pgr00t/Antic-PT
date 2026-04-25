@@ -18,6 +18,8 @@ type SpecLinkConfig struct {
 	Vault VaultConfig `yaml:"vault"`
 	// FormalTrack contains configuration for the authoritative upstream API.
 	FormalTrack FormalTrackConfig `yaml:"formal_track"`
+	// WriteTrack contains optional configuration for the write-side upstream.
+	WriteTrack WriteTrackConfig `yaml:"write_track"`
 	// Reconcile contains configuration for track reconciliation strategies.
 	Reconcile ReconcileConfig `yaml:"reconciliation"`
 	// Endpoints lists per-endpoint field classification and behaviour configuration.
@@ -40,6 +42,12 @@ type FormalTrackConfig struct {
 	Upstream string `yaml:"upstream"`
 	// TimeoutMS is the maximum time to wait for the upstream response.
 	TimeoutMS int `yaml:"timeout_ms"`
+}
+
+// WriteTrackConfig defines the write-side provisional commit upstream.
+type WriteTrackConfig struct {
+	// Upstream is the base URL of the write upstream (may differ from read upstream).
+	Upstream string `yaml:"upstream"`
 }
 
 // ReconcileConfig defines the strategy for reconciling Fast and Formal tracks.

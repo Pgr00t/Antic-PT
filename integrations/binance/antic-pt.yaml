@@ -6,6 +6,8 @@ vault:
 formal_track:
   upstream: "https://api.binance.com"
   timeout_ms: 10000
+write_track:
+  upstream: "http://localhost:4005"
 reconciliation:
   strategy: "patch"
 endpoints:

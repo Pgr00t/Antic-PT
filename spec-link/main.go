@@ -79,8 +79,17 @@ func main() {
 	// Initialise the multiplexed signal hub (GET /antic/signals).
 	hub := proxy.NewSignalHub()
 
-	// Initialise the proxy handler.
+	// Initialise the read-side proxy handler.
 	handler := proxy.NewHandler(cfg, v, hub)
+
+	// Initialise the write-side provisional commit handler.
+	// Write upstream can be overridden; defaults to same upstream as read track.
+	writeUpstream := cfg.FormalTrack.Upstream
+	// For the Binance write demo the write upstream is the local exchange server.
+	if wu := cfg.WriteTrack.Upstream; wu != "" {
+		writeUpstream = wu
+	}
+	writeHandler := proxy.NewWriteHandler(writeUpstream, hub)
 
 	mux := http.NewServeMux()
 
@@ -94,7 +103,10 @@ func main() {
 		w.Write([]byte(`{"status":"online"}`))
 	})
 
-	// Spec-Link dual-track endpoint.
+	// Spec-Link write-side provisional commit endpoint.
+	mux.HandleFunc("/spec-write/", writeHandler.HandleWrite)
+
+	// Spec-Link dual-track read endpoint.
 	mux.HandleFunc(cfg.Prefix+"/", handler.HandleSpec)
 
 	// Transparent passthrough for all other routes (API, static files via upstream).

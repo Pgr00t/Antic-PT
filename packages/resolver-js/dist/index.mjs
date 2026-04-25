@@ -88,6 +88,7 @@ var AnticipationResolver = class {
   clientId;
   handlers = {};
   status = "idle";
+  meta = null;
   // State for FILL-before-PATCH buffering (spec §9.4, §11.6)
   pendingFill = null;
   fillBufferTimer = null;
@@ -144,7 +145,7 @@ var AnticipationResolver = class {
     }
     const state = response.headers.get("X-Antic-State");
     if (state === "confirmed" || !state) {
-      const meta2 = {
+      this.meta = {
         staleness: 0,
         reconciledId: "",
         volatility: {},
@@ -152,7 +153,7 @@ var AnticipationResolver = class {
         endpointVolatility: "low"
       };
       this.status = "confirmed";
-      this.emit("speculative", data, meta2);
+      this.emit("speculative", data, this.meta);
       this.emit("confirm");
       return;
     }
@@ -163,7 +164,7 @@ var AnticipationResolver = class {
     this.deferredFields = parseDeferredFields(response.headers.get("X-Antic-Deferred-Fields"));
     const vals = Object.values(volatility);
     const endpointVolatility = vals.filter((v) => v === "high").length > vals.length / 2 ? "high" : "low";
-    const meta = {
+    this.meta = {
       staleness,
       reconciledId: reconcileId,
       volatility,
@@ -171,7 +172,7 @@ var AnticipationResolver = class {
       endpointVolatility
     };
     this.status = "speculative";
-    this.emit("speculative", data, meta);
+    this.emit("speculative", data, this.meta);
     if (!reconcileId) {
       this.status = "confirmed";
       this.emit("confirm");
@@ -184,13 +185,13 @@ var AnticipationResolver = class {
     const effectiveWindow = Math.min(maxWindowHeader, this.maxWindow);
     this.maxWindowTimer = setTimeout(() => {
       this.cleanup();
-      const meta2 = {
+      const meta = {
         reconciledId: reconcileId,
         reason: "timeout",
         elapsed: effectiveWindow,
         resource: this.path
       };
-      this.emit("speculationAbandoned", meta2);
+      this.emit("speculationAbandoned", meta);
       if (this.onTimeout === "refetch") {
         this.refetch();
       } else {

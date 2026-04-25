@@ -88,7 +88,7 @@ func (h *Handler) HandleSpec(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 2. Check the vault. 
+	// 2. Check the vault.
 	// We use the full ID including query params to distinguish parameterized resources.
 	fullID := id
 	if r.URL.RawQuery != "" {

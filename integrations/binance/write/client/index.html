@@ -1,0 +1,837 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Antic-PT | Provisional Order — Write-Side Demo</title>
+    <meta
+      name="description"
+      content="Write-side demonstration of the Antic-PT Provisional Write Commit protocol. Place a simulated BTC order and observe the dual-track lifecycle: 202 provisional render, then CONFIRM with final fill data or ABORT with authoritative revert."
+    />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;600&display=swap"
+      rel="stylesheet"
+    />
+    <style>
+      :root {
+        --bg: #0b0e11;
+        --bg-card: #1a1d23;
+        --bg-input: #12151a;
+        --border: rgba(255, 255, 255, 0.07);
+        --yellow: #fcd535;
+        --yellow-dim: rgba(252, 213, 53, 0.12);
+        --green: #0ecb81;
+        --green-dim: rgba(14, 203, 129, 0.12);
+        --red: #f6465d;
+        --red-dim: rgba(246, 70, 93, 0.12);
+        --violet: #a78bfa;
+        --violet-dim: rgba(167, 139, 250, 0.12);
+        --text: #eaecef;
+        --text-muted: #848e9c;
+        --font-mono: "JetBrains Mono", monospace;
+      }
+
+      * {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+      }
+
+      body {
+        background: var(--bg);
+        color: var(--text);
+        font-family: "Inter", sans-serif;
+        min-height: 100vh;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        padding: 40px 16px;
+        gap: 24px;
+      }
+
+      header {
+        text-align: center;
+        max-width: 520px;
+      }
+      header h1 {
+        font-size: 22px;
+        font-weight: 800;
+        letter-spacing: -0.5px;
+      }
+      header p {
+        font-size: 13px;
+        color: var(--text-muted);
+        margin-top: 6px;
+        line-height: 1.6;
+      }
+      .badge {
+        display: inline-block;
+        font-size: 10px;
+        font-weight: 700;
+        letter-spacing: 1px;
+        text-transform: uppercase;
+        padding: 3px 10px;
+        border-radius: 20px;
+        background: var(--yellow-dim);
+        color: var(--yellow);
+        border: 1px solid var(--yellow);
+        margin-bottom: 12px;
+      }
+
+      .layout {
+        display: grid;
+        grid-template-columns: 340px 420px;
+        gap: 20px;
+        width: 100%;
+        max-width: 780px;
+      }
+
+      @media (max-width: 780px) {
+        .layout {
+          grid-template-columns: 1fr;
+        }
+      }
+
+      .card {
+        background: var(--bg-card);
+        border: 1px solid var(--border);
+        border-radius: 16px;
+        padding: 24px;
+      }
+
+      .card-title {
+        font-size: 11px;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 1px;
+        color: var(--text-muted);
+        margin-bottom: 20px;
+      }
+
+      /* Order Form */
+      .form-group {
+        margin-bottom: 16px;
+      }
+      .form-group label {
+        display: block;
+        font-size: 11px;
+        font-weight: 600;
+        color: var(--text-muted);
+        text-transform: uppercase;
+        letter-spacing: 0.8px;
+        margin-bottom: 6px;
+      }
+      .form-group input,
+      .form-group select {
+        width: 100%;
+        background: var(--bg-input);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        color: var(--text);
+        font-family: var(--font-mono);
+        font-size: 14px;
+        padding: 10px 12px;
+        outline: none;
+        transition: border-color 0.2s;
+      }
+      .form-group input:focus,
+      .form-group select:focus {
+        border-color: var(--yellow);
+      }
+
+      .scenario-row {
+        display: grid;
+        grid-template-columns: 1fr 1fr 1fr;
+        gap: 8px;
+        margin-bottom: 20px;
+      }
+      .scenario-btn {
+        background: var(--bg-input);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        color: var(--text-muted);
+        font-size: 11px;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.8px;
+        padding: 8px 4px;
+        cursor: pointer;
+        text-align: center;
+        transition: all 0.15s;
+      }
+      .scenario-btn:hover {
+        border-color: rgba(255, 255, 255, 0.2);
+        color: var(--text);
+      }
+      .scenario-btn.active-fill {
+        background: var(--green-dim);
+        border-color: var(--green);
+        color: var(--green);
+      }
+      .scenario-btn.active-reject {
+        background: var(--red-dim);
+        border-color: var(--red);
+        color: var(--red);
+      }
+      .scenario-btn.active-timeout {
+        background: var(--violet-dim);
+        border-color: var(--violet);
+        color: var(--violet);
+      }
+
+      .btn-submit {
+        width: 100%;
+        background: var(--yellow);
+        color: #0b0e11;
+        border: none;
+        border-radius: 10px;
+        font-weight: 700;
+        font-size: 14px;
+        padding: 13px;
+        cursor: pointer;
+        transition:
+          opacity 0.15s,
+          transform 0.1s;
+      }
+      .btn-submit:hover {
+        opacity: 0.9;
+      }
+      .btn-submit:active {
+        transform: scale(0.99);
+      }
+      .btn-submit:disabled {
+        opacity: 0.4;
+        cursor: not-allowed;
+      }
+
+      /* Order State Card */
+      .order-state {
+        min-height: 180px;
+      }
+      .state-idle {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        height: 160px;
+        color: var(--text-muted);
+        font-size: 13px;
+      }
+
+      .order-pill {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        font-size: 11px;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.8px;
+        padding: 4px 10px;
+        border-radius: 20px;
+        margin-bottom: 14px;
+      }
+      .order-pill.provisional {
+        background: var(--yellow-dim);
+        color: var(--yellow);
+        border: 1px solid rgba(252, 213, 53, 0.3);
+      }
+      .order-pill.confirmed {
+        background: var(--green-dim);
+        color: var(--green);
+        border: 1px solid rgba(14, 203, 129, 0.3);
+      }
+      .order-pill.rejected {
+        background: var(--red-dim);
+        color: var(--red);
+        border: 1px solid rgba(246, 70, 93, 0.3);
+      }
+      .order-pill.timeout {
+        background: var(--violet-dim);
+        color: var(--violet);
+        border: 1px solid rgba(167, 139, 250, 0.3);
+      }
+
+      .order-pill::before {
+        content: "";
+        width: 6px;
+        height: 6px;
+        border-radius: 50%;
+        background: currentColor;
+      }
+      .order-pill.provisional::before {
+        animation: pulse 1s infinite;
+      }
+      @keyframes pulse {
+        0%,
+        100% {
+          opacity: 1;
+        }
+        50% {
+          opacity: 0.3;
+        }
+      }
+
+      .order-field-row {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 7px 0;
+        border-bottom: 1px solid var(--border);
+        font-size: 13px;
+      }
+      .order-field-row:last-child {
+        border-bottom: none;
+      }
+      .field-label {
+        color: var(--text-muted);
+        font-size: 12px;
+      }
+      .field-value {
+        font-family: var(--font-mono);
+        font-size: 13px;
+        font-weight: 600;
+      }
+      .field-value.provisional-val {
+        color: var(--yellow);
+      }
+      .field-value.confirmed-val {
+        color: var(--green);
+      }
+      .field-value.rejected-val {
+        color: var(--red);
+      }
+
+      .account-bar {
+        margin-top: 20px;
+        padding: 12px 14px;
+        background: var(--bg-input);
+        border-radius: 10px;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        font-size: 12px;
+      }
+      .account-label {
+        color: var(--text-muted);
+      }
+      .account-val {
+        font-family: var(--font-mono);
+        font-weight: 600;
+      }
+
+      /* Log Panel */
+      .log-panel {
+        grid-column: 1 / -1;
+        background: var(--bg-card);
+        border: 1px solid var(--border);
+        border-radius: 16px;
+        padding: 16px 20px;
+      }
+      .log-scroll {
+        max-height: 220px;
+        overflow-y: auto;
+        font-family: var(--font-mono);
+        font-size: 11.5px;
+      }
+      .log-entry {
+        display: flex;
+        gap: 10px;
+        padding: 4px 0;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.03);
+        align-items: baseline;
+      }
+      .log-time {
+        color: #444;
+        flex-shrink: 0;
+      }
+      .log-track {
+        flex-shrink: 0;
+        font-weight: 700;
+        min-width: 62px;
+      }
+      .log-track.FAST {
+        color: var(--yellow);
+      }
+      .log-track.FORMAL {
+        color: var(--violet);
+      }
+      .log-track.SYSTEM {
+        color: var(--text-muted);
+      }
+      .log-track.WRITE {
+        color: var(--green);
+      }
+      .log-track.ABORT {
+        color: var(--red);
+      }
+      .log-msg {
+        color: #9aa;
+        flex: 1;
+      }
+
+      .proxy-status {
+        font-size: 11px;
+        text-align: center;
+        color: var(--text-muted);
+        margin-top: -8px;
+      }
+      .proxy-status span {
+        font-family: var(--font-mono);
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <div class="badge">Antic-PT v1.0 · Write-Side Demo</div>
+      <h1>Provisional Order Placement</h1>
+      <p>
+        Submit a simulated BTC order. The UI renders the provisional state in
+        milliseconds. The protocol delivers CONFIRM with filled data, or ABORT
+        with the authoritative revert target.
+      </p>
+    </header>
+
+    <div class="layout">
+      <!-- Order Entry -->
+      <div class="card">
+        <div class="card-title">New Order</div>
+
+        <div class="form-group">
+          <label>Symbol</label>
+          <select id="symbol">
+            <option value="BTCUSDT">BTC / USDT</option>
+          </select>
+        </div>
+
+        <div class="form-group">
+          <label>Side</label>
+          <select id="side">
+            <option value="BUY">BUY</option>
+            <option value="SELL">SELL</option>
+          </select>
+        </div>
+
+        <div class="form-group">
+          <label>Quantity (BTC)</label>
+          <input
+            id="quantity"
+            type="number"
+            value="0.01"
+            min="0.001"
+            step="0.001"
+          />
+        </div>
+
+        <div class="form-group">
+          <label>Price (USDT)</label>
+          <input id="price" type="number" value="74800" min="1" step="1" />
+        </div>
+
+        <div class="card-title" style="margin-top: 4px">Scenario</div>
+        <div class="scenario-row">
+          <div
+            class="scenario-btn active-fill"
+            id="scenario-fill"
+            onclick="setScenario('fill')"
+          >
+            Fill
+          </div>
+          <div
+            class="scenario-btn"
+            id="scenario-reject"
+            onclick="setScenario('reject')"
+          >
+            Reject
+          </div>
+          <div
+            class="scenario-btn"
+            id="scenario-timeout"
+            onclick="setScenario('timeout')"
+          >
+            Timeout
+          </div>
+        </div>
+
+        <button class="btn-submit" id="submit-btn" onclick="placeOrder()">
+          Place Order
+        </button>
+      </div>
+
+      <!-- Order State -->
+      <div class="card order-state" id="order-card">
+        <div class="card-title">Order State</div>
+        <div class="state-idle" id="state-idle">Waiting for order...</div>
+        <div id="order-display" style="display: none"></div>
+
+        <div class="account-bar">
+          <span class="account-label">Available Balance</span>
+          <span class="account-val" id="account-bal">Loading...</span>
+        </div>
+      </div>
+
+      <!-- Protocol Log -->
+      <div class="log-panel">
+        <div class="card-title" style="margin-bottom: 12px">Protocol Log</div>
+        <div class="log-scroll" id="log">
+          <div class="log-entry">
+            <span class="log-time">--:--:--.---</span>
+            <span class="log-track SYSTEM">SYSTEM</span>
+            <span class="log-msg">Waiting for order placement...</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="proxy-status">
+      Proxy: <span id="proxy-status-val">Checking...</span>
+    </div>
+
+    <!-- Load the Antic-PT SDK from the local directory -->
+    <script src="antic-pt.js"></script>
+    <script>
+      const PROXY = "http://localhost:4002";
+      const EXCHANGE = "http://localhost:4005";
+
+      let AnticipationResolver;
+      if (window.AnticPT) {
+        AnticipationResolver =
+          window.AnticPT.AnticipationResolver ||
+          window.AnticPT.default ||
+          window.AnticPT;
+      }
+
+      if (!AnticipationResolver) {
+        document.body.innerHTML =
+          '<div style="color:white;padding:60px;text-align:center"><h1>SDK Load Error</h1><p>Could not load antic-pt.js. Run the dashboard server first.</p></div>';
+      }
+
+      // ── Scenario selector ─────────────────────────────────────────────────
+      let currentScenario = "fill";
+      function setScenario(s) {
+        currentScenario = s;
+        ["fill", "reject", "timeout"].forEach((sc) => {
+          const el = document.getElementById(`scenario-${sc}`);
+          el.className = "scenario-btn";
+          if (sc === s) el.classList.add(`active-${sc}`);
+        });
+      }
+
+      // ── Logging ──────────────────────────────────────────────────────────
+      const logEl = document.getElementById("log");
+      function log(track, msg) {
+        const t = new Date();
+        const ts =
+          t.toLocaleTimeString("en-GB", { hour12: false }) +
+          "." +
+          String(t.getMilliseconds()).padStart(3, "0");
+        const entry = document.createElement("div");
+        entry.className = "log-entry";
+        entry.innerHTML = `<span class="log-time">${ts}</span><span class="log-track ${track}">${track}</span><span class="log-msg">${msg}</span>`;
+        logEl.prepend(entry);
+      }
+
+      // ── Account Balance ──────────────────────────────────────────────────
+      const acctEl = document.getElementById("account-bal");
+      async function refreshAccount() {
+        try {
+          const r = await fetch(`${EXCHANGE}/account`);
+          const data = await r.json();
+          acctEl.textContent = `${parseFloat(data.availableBalance).toLocaleString(undefined, { minimumFractionDigits: 2 })} USDT`;
+        } catch {
+          acctEl.textContent = "Unavailable";
+        }
+      }
+      refreshAccount();
+
+      // ── Proxy Health Check ────────────────────────────────────────────────
+      const proxyStatusEl = document.getElementById("proxy-status-val");
+      async function checkProxy() {
+        try {
+          const r = await fetch(`${PROXY}/antic/ping`);
+          if (r.ok) {
+            proxyStatusEl.textContent = "ONLINE (Port 4002)";
+            proxyStatusEl.style.color = "var(--green)";
+          }
+        } catch {
+          proxyStatusEl.textContent = "OFFLINE";
+          proxyStatusEl.style.color = "var(--red)";
+        }
+      }
+      checkProxy();
+      setInterval(checkProxy, 5000);
+
+      // ── Order State Rendering ─────────────────────────────────────────────
+      function renderOrder(state, fields, pillClass, pillLabel) {
+        document.getElementById("state-idle").style.display = "none";
+        const display = document.getElementById("order-display");
+        display.style.display = "block";
+
+        const rows = fields
+          .map(
+            ([label, value, valClass]) =>
+              `<div class="order-field-row">
+                    <span class="field-label">${label}</span>
+                    <span class="field-value ${valClass || ""}">${value ?? "—"}</span>
+                </div>`,
+          )
+          .join("");
+
+        display.innerHTML = `
+                <div class="order-pill ${pillClass}">${pillLabel}</div>
+                ${rows}
+            `;
+      }
+
+      // ── Place Order ───────────────────────────────────────────────────────
+      async function placeOrder() {
+        const btn = document.getElementById("submit-btn");
+        btn.disabled = true;
+
+        const symbol = document.getElementById("symbol").value;
+        const side = document.getElementById("side").value;
+        const quantity = document.getElementById("quantity").value;
+        const price = document.getElementById("price").value;
+        const scenario =
+          currentScenario === "fill" ? undefined : currentScenario;
+
+        const payload = { symbol, side, quantity, price };
+        if (scenario) payload.scenario = scenario;
+
+        log(
+          "SYSTEM",
+          `⚡ Placing ${side} ${quantity} ${symbol} @ ${parseFloat(price).toLocaleString()} USDT [scenario: ${currentScenario}]`,
+        );
+
+        const clientId =
+          localStorage.getItem("antic_client_id") ||
+          (() => {
+            const id = crypto.randomUUID();
+            localStorage.setItem("antic_client_id", id);
+            return id;
+          })();
+
+        const start = performance.now();
+
+        // Connect SSE signal channel before firing the write so we don't miss signals.
+        const eventSource = new EventSource(
+          `${PROXY}/antic/signals?client_id=${clientId}`,
+        );
+        let reconciledId = null;
+        let settled = false;
+
+        function settle() {
+          if (settled) return;
+          settled = true;
+          eventSource.close();
+          btn.disabled = false;
+          refreshAccount();
+        }
+
+        eventSource.addEventListener("confirm", (e) => {
+          const signal = JSON.parse(e.data);
+          if (signal.id !== reconciledId) return;
+          const elapsed = Math.round(performance.now() - start);
+          const data = signal.data || {};
+
+          log(
+            "FORMAL",
+            `CONFIRM — order committed at ${data.price ? parseFloat(data.price).toLocaleString() : "N/A"} USDT (${elapsed}ms)`,
+          );
+
+          renderOrder(
+            "confirmed",
+            [
+              ["Order ID", data.orderId, "confirmed-val"],
+              ["Status", data.status, "confirmed-val"],
+              [
+                "Filled @",
+                data.price
+                  ? `${parseFloat(data.price).toLocaleString(undefined, { minimumFractionDigits: 2 })} USDT`
+                  : "—",
+                "confirmed-val",
+              ],
+              [
+                "Requested",
+                data.requestedPrice
+                  ? `${parseFloat(data.requestedPrice).toLocaleString(undefined, { minimumFractionDigits: 2 })} USDT`
+                  : "—",
+                "",
+              ],
+              ["Qty", data.quantity ? `${data.quantity} BTC` : "—", ""],
+              ["Fee", data.fee ? `${data.fee} ${data.feeCurrency}` : "—", ""],
+              [
+                "Filled At",
+                data.filledAt
+                  ? new Date(data.filledAt).toLocaleTimeString()
+                  : "—",
+                "",
+              ],
+            ],
+            "confirmed",
+            "Confirmed — Filled",
+          );
+          settle();
+        });
+
+        eventSource.addEventListener("abort", (e) => {
+          const signal = JSON.parse(e.data);
+          if (signal.id !== reconciledId) return;
+          const elapsed = Math.round(performance.now() - start);
+
+          log(
+            "ABORT",
+            `ABORT — ${signal.reason} retryable:${signal.retryable} (${elapsed}ms)`,
+          );
+
+          const stateFields = signal.state
+            ? [
+                ["Reason", signal.reason, "rejected-val"],
+                ["Retryable", String(signal.retryable), ""],
+                ...Object.entries(signal.state).map(([k, v]) => [
+                  k,
+                  v,
+                  "rejected-val",
+                ]),
+              ]
+            : [
+                ["Reason", signal.reason, "rejected-val"],
+                ["Retryable", String(signal.retryable), ""],
+                ["State", "Unknown — refetch required", "rejected-val"],
+              ];
+
+          renderOrder(
+            "rejected",
+            stateFields,
+            "rejected",
+            `Aborted — ${signal.reason}`,
+          );
+          settle();
+        });
+
+        eventSource.onerror = () => {
+          if (!settled) {
+            log("ABORT", "ABORT — connection_lost (synthetic)");
+            settle();
+          }
+        };
+
+        // POST the write through the Spec-Link write handler.
+        let response;
+        try {
+          response = await fetch(`${PROXY}/spec-write/orders`, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "X-Antic-Client-Id": clientId,
+              "X-Antic-Write-Mode": "exclusive",
+            },
+            body: JSON.stringify(payload),
+          });
+        } catch (err) {
+          log("ABORT", `ABORT — fetch failed: ${err.message}`);
+          settle();
+          return;
+        }
+
+        const elapsed = Math.round(performance.now() - start);
+
+        // Synchronous rejection (e.g. 422 insufficient_funds, 409 write_conflict)
+        if (!response.ok) {
+          const errorBody = await response.json().catch(() => ({}));
+          const anticState = response.headers.get("X-Antic-State") || "unknown";
+          const reason = errorBody.error || "write_rejected";
+
+          log("ABORT", `ABORT — ${reason} (synchronous, ${elapsed}ms)`);
+
+          const rejectFields = [
+            ["Reason", errorBody.error || reason, "rejected-val"],
+            ["Message", errorBody.message || "N/A", ""],
+            ...(errorBody.account
+              ? [
+                  [
+                    "Balance",
+                    `${errorBody.account.balance} USDT`,
+                    "rejected-val",
+                  ],
+                  [
+                    "Available",
+                    `${errorBody.account.availableBalance} USDT`,
+                    "rejected-val",
+                  ],
+                ]
+              : []),
+          ];
+          renderOrder(
+            "rejected",
+            rejectFields,
+            "rejected",
+            `Rejected — ${reason}`,
+          );
+          settle();
+          return;
+        }
+
+        // 202 Accepted — provisional response
+        const provisional = await response.json();
+        reconciledId = response.headers.get("X-Antic-Reconcile-Id");
+        const maxWindow = parseInt(
+          response.headers.get("X-Antic-Max-Window") || "10000",
+          10,
+        );
+
+        log(
+          "WRITE",
+          `PROVISIONAL — orderId: ${provisional.orderId || "pending"} reconcileId: ${reconciledId} (${elapsed}ms)`,
+        );
+
+        renderOrder(
+          "provisional",
+          [
+            [
+              "Order ID",
+              provisional.orderId || "Pending...",
+              "provisional-val",
+            ],
+            ["Status", provisional.status || "PENDING", "provisional-val"],
+            ["Symbol", provisional.symbol, ""],
+            ["Side", provisional.side, ""],
+            [
+              "Qty",
+              provisional.quantity ? `${provisional.quantity} BTC` : "—",
+              "",
+            ],
+            [
+              "Price",
+              provisional.price
+                ? `${parseFloat(provisional.price).toLocaleString(undefined, { minimumFractionDigits: 2 })} USDT`
+                : "—",
+              "provisional-val",
+            ],
+          ],
+          "provisional",
+          "Provisional — Pending Commit",
+        );
+
+        // Safety timeout: if no signal within max window, settle as timeout ABORT.
+        setTimeout(() => {
+          if (!settled) {
+            log(
+              "ABORT",
+              `ABORT — upstream_timeout (no signal within ${maxWindow}ms)`,
+            );
+            renderOrder(
+              "timeout",
+              [
+                ["Reason", "upstream_timeout", "field-value"],
+                ["Retryable", "true", ""],
+                ["State", "Unknown — refetch before retry", ""],
+              ],
+              "timeout",
+              "Aborted — Timeout",
+            );
+            settle();
+          }
+        }, maxWindow + 500);
+      }
+    </script>
+  </body>
+</html>

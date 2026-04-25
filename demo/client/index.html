@@ -1145,17 +1145,16 @@
           display.className = 'data-display speculative';
           renderData('display-antic', currentResource, data, meta.deferredFields);
 
-          signalContainer.innerHTML = `<span class="signal-badge signal-speculative">⚡ Speculative</span>`;
-          
           if (meta.reconciledId) {
+            signalContainer.innerHTML = `<span class="signal-badge signal-speculative">⚡ Speculative</span>`;
             logEvent('fast', `SPECULATIVE — staleness: ${meta.staleness}ms, reconcileId: ${meta.reconciledId.slice(0,14)}`, elapsed);
           } else {
-            // Cold hit. We skip the FAST log here and let 'confirm' handle it
-            // as a single consolidated event to match the spec.
+            // Cold hit: serve as a terminal FAST entry per spec.
             signalContainer.innerHTML = `<span class="signal-badge signal-confirm">✓ Confirmed</span>`;
+            logEvent('fast', `CONFIRMED (Cold Hit) — truth arrived directly from upstream`, elapsed);
           }
 
-          if (meta.deferredFields.length > 0) {
+          if (meta.deferredFields && meta.deferredFields.length > 0) {
             logEvent('system', `DEFERRED fields withheld: ${meta.deferredFields.join(', ')}`);
           }
           fastTrackDone = true;
@@ -1231,12 +1230,12 @@
           timeFormal.textContent = `Formal Track: ${formalLatency}ms`;
           display.className = 'data-display speculative confirmed';
           
-          if (resolver.meta && !resolver.meta.reconciledId) {
-            // This was a cold hit. Exactly one log line produced in Formal track.
-            logEvent('formal', `CONFIRMED (Cold Hit) — truth arrived directly from upstream`, formalLatency);
-          } else {
+          if (resolver.meta && resolver.meta.reconciledId) {
+            // Only log FORMAL confirm if we were in a speculative loop (Warm Hit).
             logEvent('formal', `CONFIRM — speculative was accurate`, formalLatency);
           }
+          // Note: Cold hits (no reconciledId) skip logging here as they are 
+          // already logged as consolidated FAST entries.
           
           signalContainer.innerHTML = `<span class="signal-badge signal-confirm">✓ CONFIRM</span>`;
           updateViz(null, null, formalLatency);
