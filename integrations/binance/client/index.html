@@ -1,0 +1,377 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Antic-PT | Binance Certainty Layer</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&family=JetBrains+Mono&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --binance-yellow: #FCD535;
+            --bg-dark: #0B0E11;
+            --bg-card: #1E2329;
+            --text-primary: #EAECEF;
+            --text-secondary: #848E9C;
+            --up-green: #0ECB81;
+            --down-red: #F6465D;
+            --violet: #A78BFA;
+        }
+
+        body {
+            background: var(--bg-dark);
+            color: var(--text-primary);
+            font-family: 'Inter', sans-serif;
+            margin: 0;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+        }
+
+        .container {
+            width: 100%;
+            max-width: 500px;
+            padding: 24px;
+        }
+
+        .card {
+            background: var(--bg-card);
+            border-radius: 16px;
+            padding: 32px;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.4);
+            position: relative;
+            overflow: hidden;
+            border: 1px solid rgba(255,255,255,0.05);
+        }
+
+        .badge {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 10px;
+            font-weight: 800;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            background: rgba(252, 213, 53, 0.1);
+            color: var(--binance-yellow);
+            border: 1px solid var(--binance-yellow);
+        }
+
+        .symbol {
+            font-size: 14px;
+            color: var(--text-secondary);
+            font-weight: 600;
+            margin-bottom: 8px;
+        }
+
+        .price {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 48px;
+            font-weight: 800;
+            margin-bottom: 12px;
+            transition: color 0.3s ease;
+        }
+
+        .price.speculative {
+            color: var(--binance-yellow);
+            text-shadow: 0 0 20px rgba(252, 213, 53, 0.4);
+        }
+
+        .price.patching {
+            animation: flash-violet 0.5s ease-out;
+        }
+
+        @keyframes flash-violet {
+            0% { color: var(--violet); text-shadow: 0 0 30px var(--violet); }
+            100% { color: var(--text-primary); }
+        }
+
+        .metrics {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 16px;
+            margin-top: 32px;
+            padding-top: 32px;
+            border-top: 1px solid rgba(255,255,255,0.1);
+        }
+
+        .metric-label {
+            font-size: 11px;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            margin-bottom: 4px;
+        }
+
+        .metric-value {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 16px;
+            font-weight: 600;
+        }
+
+        .deferred {
+            background: rgba(255,255,255,0.05);
+            height: 20px;
+            border-radius: 4px;
+            width: 100%;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .deferred::after {
+            content: "";
+            position: absolute;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: linear-gradient(90deg, transparent, rgba(252, 213, 53, 0.1), transparent);
+            animation: loading 1.5s infinite;
+        }
+
+        @keyframes loading {
+            0% { transform: translateX(-100%); }
+            100% { transform: translateX(100%); }
+        }
+
+        .log-panel {
+            margin-top: 32px;
+            background: rgba(0,0,0,0.3);
+            border-radius: 12px;
+            padding: 16px;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 11px;
+            max-height: 200px;
+            overflow-y: auto;
+            border: 1px solid rgba(255,255,255,0.05);
+        }
+
+        .log-entry { margin-bottom: 4px; border-left: 2px solid #333; padding-left: 8px; }
+        .log-time { color: #555; }
+        .log-track-fast { color: var(--binance-yellow); font-weight: bold; }
+        .log-track-formal { color: var(--violet); font-weight: bold; }
+        .log-msg { color: #aaa; }
+
+        .controls {
+            margin-top: 24px;
+            display: flex;
+            justify-content: center;
+        }
+
+        .btn {
+            background: var(--binance-yellow);
+            color: var(--bg-dark);
+            border: none;
+            padding: 12px 32px;
+            border-radius: 8px;
+            font-weight: 700;
+            cursor: pointer;
+            transition: transform 0.1s, opacity 0.1s;
+        }
+
+        .btn:active { transform: scale(0.98); }
+        .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="card">
+            <div class="badge">Antic-PT Enabled</div>
+            <div id="symbol" class="symbol">BTC / USDT</div>
+            <div id="price" class="price">0.00</div>
+            
+            <div class="metrics">
+                <div>
+                    <div class="metric-label">24h Change</div>
+                    <div id="change" class="metric-value">...</div>
+                </div>
+                <div>
+                    <div class="metric-label">Bid Price</div>
+                    <div id="bid" class="metric-value"><div class="deferred"></div></div>
+                </div>
+                <div>
+                    <div class="metric-label">24h Volume</div>
+                    <div id="volume" class="metric-value">...</div>
+                </div>
+                <div>
+                    <div class="metric-label">Ask Price</div>
+                    <div id="ask" class="metric-value"><div class="deferred"></div></div>
+                </div>
+            </div>
+        </div>
+
+        <div class="controls">
+            <button id="refresh-btn" class="btn">Fetch Live Truth</button>
+        </div>
+
+        <div id="status-bar" style="margin-top:12px; font-size:10px; text-align:center; color:#555;">
+            Proxy Status: <span id="proxy-status">Checking...</span>
+        </div>
+
+        <div id="log" class="log-panel">
+            <div class="log-entry"><span class="log-msg">Press button to fork tracks...</span></div>
+        </div>
+    </div>
+
+    <!-- Load the globally-bundled Antic-PT SDK -->
+    <script src="antic-pt.js"></script>
+    <script>
+        // Robust detection of the AnticipationResolver from the IIFE bundle
+        let AnticipationResolver;
+        if (window.AnticPT) {
+            AnticipationResolver = window.AnticPT.AnticipationResolver || window.AnticPT.default || window.AnticPT;
+        }
+
+        if (!AnticipationResolver) {
+            console.error('Antic-PT SDK failed to load or initialize.');
+            document.body.innerHTML = '<div style="color:white; padding:50px; text-align:center;"><h1>SDK Load Error</h1><p>The Antic-PT SDK (antic-pt.js) could not be initialized. Check the browser console.</p></div>';
+        }
+
+        const PROXY_URL = 'http://localhost:4002';
+        const logEl = document.getElementById('log');
+        const proxyStatusEl = document.getElementById('proxy-status');
+
+        async function checkProxy() {
+            try {
+                // Pin against a dedicated non-keep-alive endpoint to avoid connection exhaustion
+                const res = await fetch(`${PROXY_URL}/antic/ping`, { method: 'GET' });
+                if (res.ok) {
+                    proxyStatusEl.textContent = 'ONLINE (Port 4002)';
+                    proxyStatusEl.style.color = 'var(--up-green)';
+                }
+            } catch (e) {
+                proxyStatusEl.textContent = 'OFFLINE (Is proxy running?)';
+                proxyStatusEl.style.color = 'var(--down-red)';
+            }
+        }
+        checkProxy();
+        setInterval(checkProxy, 5000);
+
+        function log(track, msg) {
+            const entry = document.createElement('div');
+            entry.className = 'log-entry';
+            const time = new Date().toLocaleTimeString([], { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' }) + '.' + String(new Date().getMilliseconds()).padStart(3, '0');
+            entry.innerHTML = `<span class="log-time">${time}</span> ${track ? `<span class="log-track-${track.toLowerCase()}">${track.toUpperCase()}</span> ` : ''}<span class="log-msg">${msg}</span>`;
+            logEl.prepend(entry);
+        }
+
+        const priceEl = document.getElementById('price');
+        const symbolEl = document.getElementById('symbol'); // Added missing ref
+        const changeEl = document.getElementById('change'); // Added missing ref
+        const volEl = document.getElementById('volume'); // Added missing ref
+        const bidEl = document.getElementById('bid'); // Added missing ref
+        const askEl = document.getElementById('ask'); // Added missing ref
+        const refreshBtn = document.getElementById('refresh-btn');
+
+        refreshBtn.onclick = async () => {
+            refreshBtn.disabled = true;
+            log(null, '⚡ Forking tracks: /api/v3/ticker/24hr?symbol=BTCUSDT');
+            
+            const start = performance.now();
+            let state = {};
+
+            const resolver = new AnticipationResolver('/spec/api/v3/ticker/24hr?symbol=BTCUSDT', {
+                baseUrl: PROXY_URL,
+                maxWindow: 10000,
+                onTimeout: 'error'
+            });
+
+            resolver
+                .on('speculative', (data, meta) => {
+                    const elapsed = Math.round(performance.now() - start);
+                    state = data;
+                    
+                    // Only log FAST track if we actually had a reconcileId (Warm Hit)
+                    if (meta.reconciledId) {
+                        log('FAST', `SPECULATIVE — staleness: ${meta.staleness}ms (${elapsed}ms)`);
+                    }
+                    
+                    if (data.lastPrice) {
+                        const price = parseFloat(data.lastPrice);
+                        priceEl.textContent = price.toLocaleString(undefined, { minimumFractionDigits: 2 });
+                        priceEl.className = 'price speculative';
+                    }
+
+                    // Hydrate in-variants
+                    if (data.symbol) symbolEl.textContent = data.symbol.replace('USDT', ' / USDT');
+                    if (data.priceChangePercent) {
+                        const pct = parseFloat(data.priceChangePercent);
+                        changeEl.textContent = `${pct > 0 ? '+' : ''}${pct}%`;
+                        changeEl.className = pct >= 0 ? 'stat-value up' : 'stat-value down';
+                    }
+                    if (data.volume) volEl.textContent = parseFloat(data.volume).toLocaleString(undefined, { notation: 'compact' });
+
+                    // Show skeleton for deferred
+                    bidEl.className = 'stat-value deferred';
+                    askEl.className = 'stat-value deferred';
+                })
+                .on('patch', (ops) => {
+                    const elapsed = Math.round(performance.now() - start);
+                    priceEl.classList.add('patching');
+                    setTimeout(() => priceEl.classList.remove('patching'), 500);
+                    
+                    // Apply patches to local state
+                    ops.forEach(op => {
+                        const field = op.path.replace('/', '');
+                        if (op.op === 'replace' && field === 'lastPrice') {
+                            const old = state.lastPrice;
+                            state.lastPrice = op.value;
+                            priceEl.textContent = parseFloat(op.value).toLocaleString(undefined, { minimumFractionDigits: 2 });
+                            log('FORMAL', `PATCH — truth corrected: lastPrice ${parseFloat(old).toFixed(2)} → ${parseFloat(op.value).toFixed(2)} (${elapsed}ms)`);
+                        }
+                    });
+                })
+                .on('fill', (fields) => {
+                    const elapsed = Math.round(performance.now() - start);
+                    if (fields.bidPrice) {
+                        document.getElementById('bid').innerHTML = `<span style="color:var(--violet)">${parseFloat(fields.bidPrice).toFixed(2)}</span>`;
+                    }
+                    if (fields.askPrice) {
+                        document.getElementById('ask').innerHTML = `<span style="color:var(--violet)">${parseFloat(fields.askPrice).toFixed(2)}</span>`;
+                    }
+                    log('FORMAL', `FILL — deferred order-book data delivered (${elapsed}ms)`);
+                })
+                .on('replace', (data) => {
+                    const elapsed = Math.round(performance.now() - start);
+                    state = data;
+                    
+                    // Full UI refresh from replace payload
+                    if (data.lastPrice) {
+                        priceEl.textContent = parseFloat(data.lastPrice).toLocaleString(undefined, { minimumFractionDigits: 2 });
+                    }
+                    if (data.symbol) symbolEl.textContent = data.symbol.replace('USDT', ' / USDT');
+                    if (data.priceChangePercent) {
+                        changeEl.textContent = parseFloat(data.priceChangePercent).toFixed(2) + '%';
+                    }
+                    if (data.volume) volEl.textContent = parseFloat(data.volume).toFixed(0);
+                    
+                    log('FORMAL', `REPLACE — high drift detected, full state reset (${elapsed}ms)`);
+                    priceEl.className = 'price';
+                    refreshBtn.disabled = false;
+                })
+                .on('confirm', () => {
+                    const elapsed = Math.round(performance.now() - start);
+                    
+                    // If no reconcileId, it was a cold hit (atomic)
+                    if (!resolver.meta || !resolver.meta.reconciledId) {
+                        log('FORMAL', `CONFIRMED — authoritative cold hit (${elapsed}ms)`);
+                    } else {
+                        log('FORMAL', `CONFIRM — speculative was accurate (${elapsed}ms)`);
+                    }
+                    
+                    priceEl.className = 'price';
+                    refreshBtn.disabled = false;
+                })
+                .on('abort', (reason) => {
+                    log('FORMAL', `ABORT — protocol fallback: ${reason}`);
+                    refreshBtn.disabled = false;
+                });
+
+            try {
+                await resolver.fetch();
+            } catch (e) {
+                log('SYSTEM', `Error: ${e.message}`);
+                refreshBtn.disabled = false;
+            }
+        };
+    </script>
+</body>
+</html>

@@ -30,7 +30,7 @@ import (
 	"antic-pt/spec-link/vault"
 )
 
-const defaultMaxWindowMs = 3000
+const defaultMaxWindowMs = 10000
 
 // Handler implements the Spec-Link HTTP proxy logic.
 type Handler struct {
@@ -88,13 +88,18 @@ func (h *Handler) HandleSpec(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 2. Check the vault.
-	entry := h.vault.Get(resource, id)
+	// 2. Check the vault. 
+	// We use the full ID including query params to distinguish parameterized resources.
+	fullID := id
+	if r.URL.RawQuery != "" {
+		fullID = id + "?" + r.URL.RawQuery
+	}
+	entry := h.vault.Get(resource, fullID)
 
 	// 3. Cold miss or stale → serve confirmed directly.
 	maxStaleness := h.classifier.MaxStalenessMs(resourcePath)
 	if entry == nil || entry.AgeMS() > int64(maxStaleness) {
-		h.serveConfirmed(w, r, resourcePath)
+		h.serveConfirmed(w, r, resourcePath, fullID) // Pass fullID
 		return
 	}
 
@@ -109,7 +114,7 @@ func (h *Handler) HandleSpec(w http.ResponseWriter, r *http.Request) {
 	}
 	if clientID == "" {
 		// No client ID → cannot route signals; serve confirmed instead.
-		h.serveConfirmed(w, r, resourcePath)
+		h.serveConfirmed(w, r, resourcePath, fullID)
 		return
 	}
 
@@ -162,7 +167,7 @@ func (h *Handler) HandleSpec(w http.ResponseWriter, r *http.Request) {
 	go func() {
 		defer cancel()
 		defer h.snapshots.Release(reconcileID)
-		h.runFormalTrack(ctx, r, resourcePath, resource, id, snap, clientID, reconcileID, deferredSet)
+		h.runFormalTrack(ctx, r, resourcePath, resource, fullID, snap, clientID, reconcileID, deferredSet)
 	}()
 }
 
@@ -172,7 +177,7 @@ func (h *Handler) HandleSpec(w http.ResponseWriter, r *http.Request) {
 
 // serveConfirmed proxies directly to upstream, returns X-Antic-State: confirmed,
 // populates the vault, and sends no reconciliation signal.
-func (h *Handler) serveConfirmed(w http.ResponseWriter, r *http.Request, resourcePath string) {
+func (h *Handler) serveConfirmed(w http.ResponseWriter, r *http.Request, resourcePath, fullID string) {
 	upstreamURL := h.cfg.FormalTrack.Upstream + resourcePath
 	if r.URL.RawQuery != "" {
 		upstreamURL += "?" + r.URL.RawQuery
@@ -215,14 +220,14 @@ func (h *Handler) serveConfirmed(w http.ResponseWriter, r *http.Request, resourc
 	var freshData map[string]interface{}
 	if err := json.Unmarshal(body, &freshData); err == nil {
 		delete(freshData, "_meta")
-		resource, id, _ := parsePath(resourcePath)
-		h.vault.Set(resource, id, freshData)
+		resource, _, _ := parsePath(resourcePath)
+		h.vault.Set(resource, fullID, freshData)
 	}
 
 	// Return with confirmed header — no Reconcile-Id, no signal.
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Access-Control-Allow-Origin", "*")
-	w.Header().Set("Access-Control-Expose-Headers", "X-Antic-State")
+	w.Header().Set("Access-Control-Expose-Headers", "X-Antic-State, X-Antic-Reconcile-Id, X-Antic-Staleness")
 	w.Header().Set("X-Antic-State", "confirmed")
 	w.WriteHeader(http.StatusOK)
 	w.Write(body)

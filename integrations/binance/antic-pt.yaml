@@ -1,0 +1,23 @@
+port: 4002
+prefix: "/spec"
+vault:
+  driver: "memory"
+  default_ttl_ms: 120000
+formal_track:
+  upstream: "https://api.binance.com"
+  timeout_ms: 10000
+reconciliation:
+  strategy: "patch"
+endpoints:
+  - path: "/api/v3/ticker/24hr"
+    volatility: "high"
+    max_staleness_ms: 300000
+    fields:
+      lastPrice: { class: "SPECULATIVE", volatility: "high" }
+      priceChange: { class: "SPECULATIVE", volatility: "high" }
+      priceChangePercent: { class: "SPECULATIVE", volatility: "high" }
+      volume: { class: "SPECULATIVE", volatility: "high" }
+      bidPrice: { class: "DEFERRED" }
+      askPrice: { class: "DEFERRED" }
+      count: { class: "DEFERRED" }
+      symbol: { class: "INVARIANT" }

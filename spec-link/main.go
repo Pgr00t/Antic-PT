@@ -87,6 +87,13 @@ func main() {
 	// Signal channel endpoint — one persistent SSE connection per client.
 	mux.HandleFunc("/antic/signals", hub.ServeSignals)
 
+	// Health check endpoint (non-keep-alive).
+	mux.HandleFunc("/antic/ping", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"status":"online"}`))
+	})
+
 	// Spec-Link dual-track endpoint.
 	mux.HandleFunc(cfg.Prefix+"/", handler.HandleSpec)
 

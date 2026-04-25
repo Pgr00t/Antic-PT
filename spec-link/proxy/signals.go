@@ -98,6 +98,12 @@ func (h *SignalHub) Publish(clientID string, ev sseEvent, maxWindow time.Duratio
 // ServeSignals is the HTTP handler for GET /antic/signals?client_id=<uuid>.
 // It establishes a persistent SSE connection and streams reconciliation signals.
 func (h *SignalHub) ServeSignals(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+
 	clientID := r.URL.Query().Get("client_id")
 	if clientID == "" {
 		http.Error(w, `{"error":"client_id query parameter is required"}`, http.StatusBadRequest)
