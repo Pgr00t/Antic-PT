@@ -910,6 +910,14 @@ Provisional writes require:
 3. **Maximum uncertainty window SLAs**: Unlike reads (where a stale speculative response is merely imprecise), a provisional write that never confirms leaves real-world state (an order, a payment, an account update) in an undefined condition. The proxy must guarantee signal delivery or explicitly emit ABORT within the window.
 4. **Write-lock release guarantees**: Exclusive locks must be released on CONFIRM, ABORT, or timeout — never left dangling. Dangling locks require manual operator intervention.
 
+**SSE Reconnect After Write Commit**
+
+If a write commits on the upstream and the proxy has emitted CONFIRM internally but the client's SSE connection drops before CONFIRM is delivered, the following behavior is required: on reconnect, the proxy must replay the CONFIRM signal (with `data` if applicable) within the original `X-Antic-Max-Window` from the time of provisional response. If the reconnect occurs after the window has expired, the proxy must not replay and the client must emit a synthetic ABORT with `reason: connection_lost, retryable: true`. The client then refetches the resource directly — the refetch will return the committed state, and the client resolves from there. Silence on reconnect is not permitted. The client must always know whether its provisional write succeeded.
+
+**Unknown Outcome on Upstream Timeout**
+
+When ABORT is emitted with `reason: upstream_timeout`, the upstream write outcome is unknown — the proxy's connection to the upstream timed out before the upstream confirmed or rejected the commit. The write may have succeeded. It may have failed. The proxy cannot know. Clients must treat the resource as unconfirmed and refetch before retrying. Retry logic must be idempotent — upstream endpoints used with Antic-PT provisional writes must support idempotency keys (e.g., `Idempotency-Key` request header per IETF draft-ietf-httpapi-idempotency-key-header). A retry without idempotency key protection risks a duplicate write against an already-committed upstream state.
+
 The read-side work in v0.2 builds the trust foundation in the signal vocabulary, delivery mechanism, and client SDK contract that provisional writes require before operators will trust the protocol with write semantics.
 
 ---
