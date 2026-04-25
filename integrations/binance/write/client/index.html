@@ -740,7 +740,7 @@
           const anticState = response.headers.get("X-Antic-State") || "unknown";
           const reason = errorBody.error || "write_rejected";
 
-          log("ABORT", `ABORT — ${reason} (synchronous, ${elapsed}ms)`);
+          log("ABORT", `ABORT — ${reason} (rejected, ${elapsed}ms)`);
 
           const rejectFields = [
             ["Reason", errorBody.error || reason, "rejected-val"],
@@ -774,7 +774,7 @@
         const provisional = await response.json();
         reconciledId = response.headers.get("X-Antic-Reconcile-Id");
         const maxWindow = parseInt(
-          response.headers.get("X-Antic-Max-Window") || "10000",
+          response.headers.get("X-Antic-Max-Window") || "3000",
           10,
         );
 
@@ -814,10 +814,8 @@
         // Safety timeout: if no signal within max window, settle as timeout ABORT.
         setTimeout(() => {
           if (!settled) {
-            log(
-              "ABORT",
-              `ABORT — upstream_timeout (no signal within ${maxWindow}ms)`,
-            );
+            const totalElapsed = Math.round(performance.now() - start);
+            log("ABORT", `ABORT — upstream_timeout (timeout, ${totalElapsed}ms)`);
             renderOrder(
               "timeout",
               [

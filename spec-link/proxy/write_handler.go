@@ -99,7 +99,7 @@ func NewWriteHandler(upstream string, hub *SignalHub) *WriteHandler {
 	}
 }
 
-const writeMaxWindowMs = 10000
+const writeMaxWindowMs = 3000
 
 // HandleWrite is the HTTP handler for POST /spec-write/*.
 func (h *WriteHandler) HandleWrite(w http.ResponseWriter, r *http.Request) {
