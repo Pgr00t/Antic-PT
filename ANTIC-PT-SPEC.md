@@ -1,5 +1,5 @@
 # Antic-PT Protocol Specification
-## Draft v0.2.1 — Partial Payload Reconciliation for HTTP APIs
+## Draft v0.2.2 — Partial Payload Reconciliation + Provisional Write Commits
 
 ---
 
@@ -15,7 +15,7 @@ Antic-PT does not replace HTTP caching. It replaces the silence that follows it.
 
 ## Status of This Document
 
-Draft v0.2.1. Not yet submitted for standardization. Reference implementation available as Spec-Link (Go proxy) and AnticipationResolver (JavaScript SDK).
+Draft v0.2.2. Not yet submitted for standardization. Reference implementation available as Spec-Link (Go proxy) and AnticipationResolver (JavaScript SDK). Section 13 (Provisional Write Commits) is fully specified; implementation targets v1.0.
 
 ---
 
@@ -696,33 +696,221 @@ For concurrent requests targeting the same resource:
 
 ---
 
-## 13. Future Extension: Provisional Write Commits
+## 13. Provisional Write Commits (v1.0 Specification)
 
-This section defines the intended direction for Antic-PT v1.0. It is not implemented in v0.2. It is documented here to ensure the read-path signal vocabulary is designed compatibly with the write-path extension.
+This section defines the Antic-PT v1.0 write-side extension. It is not implemented in v0.2. The read-path signal vocabulary in Sections 6–8 is designed to be compatible with this extension without modification.
 
-See branch `v1-provisional-writes` for the current working implementation draft.
+---
 
 ### 13.1 The Problem
 
 Client-side optimism (the client guesses what the server will return on a write) is architecturally unsound: the client is the least informed party and has no standardized mechanism to be corrected. Blocking UX (the client waits for full server confirmation) is slow. Neither is acceptable.
 
+The gap is not in the client's rendering strategy — it is in the protocol's write-side semantics. There is no standardized mechanism for a server to say "I am provisionally accepting this write; here is what you may render now; I will correct you if the final outcome differs."
+
+---
+
 ### 13.2 The Provisional Commit Model
 
-In Antic-PT v1.0, a server may respond to a write with a provisional commit:
+In Antic-PT v1.0, a server may respond to a write (POST, PUT, PATCH, DELETE) with a **provisional commit**:
 
 ```http
-POST /api/orders
-HTTP 202 Accepted
+POST /api/orders HTTP/1.1
+Content-Type: application/json
+X-Antic-Client-Id: 7f3a82b1-9c4d-4f2e-b3a1-2d8e6f9b0c3a
+
+HTTP/1.1 202 Accepted
 X-Antic-State: provisional
 X-Antic-Reconcile-Id: arc_c7f29a1b
 X-Antic-Max-Window: 5000
+
+{
+  "orderId": "ord_9a3b2c1d",
+  "symbol": "BTCUSDT",
+  "side": "BUY",
+  "quantity": "0.01",
+  "price": "74800.00",
+  "status": "PENDING"
+}
 ```
 
-The client renders success immediately. The server emits CONFIRM or ABORT when the transaction finalizes.
+The client renders the provisional response immediately. The server emits `CONFIRM` or `ABORT` when the transaction finalizes.
 
-### 13.3 Why This Requires v1.0
+**`202 Accepted` is mandatory** for provisional responses. `200 OK` must not be used for provisional writes — it implies finality the server is not yet asserting.
 
-Provisional writes require durable signal delivery guarantees, server-side provisional state persistence, and maximum uncertainty window SLAs — none of which a proxy layer alone can provide. The read-side work in v0.2 builds the trust foundation in the signal vocabulary that provisional writes require before the industry will adopt them.
+PROVISIONAL fields (Section 4.4) are fields in the write response whose final values are not yet confirmed. The client renders them as speculative pending confirmation.
+
+---
+
+### 13.3 Write-Side Signal Vocabulary
+
+The read-side signals (`PATCH`, `FILL`, `REPLACE`) are not emitted for provisional writes. Writes use `CONFIRM` and `ABORT` only.
+
+#### 13.3.1 CONFIRM on a Write
+
+`CONFIRM` closes the provisional window with a successful outcome. It carries an optional `data` field.
+
+```json
+{
+  "signal": "CONFIRM",
+  "id": "arc_c7f29a1b",
+  "timestamp": 1718200032441,
+  "data": {
+    "orderId": "ord_9a3b2c1d",
+    "symbol": "BTCUSDT",
+    "side": "BUY",
+    "quantity": "0.01",
+    "price": "74801.23",
+    "status": "FILLED",
+    "filledAt": 1718200032100
+  }
+}
+```
+
+**If `data` is absent**: The provisional response is treated as exact. The client marks all PROVISIONAL fields as confirmed without modification.
+
+**If `data` is present**: The client replaces the provisionally rendered state with `data` entirely, as if a read-side `REPLACE` signal had been received. This handles the case where the confirmed outcome differs from the provisional response — e.g., a limit order filled at a slightly different price due to fee adjustments or partial fills.
+
+**Client required behavior**: Apply `data` if present; mark provisional state confirmed; remove all speculative UI indicators.
+
+#### 13.3.2 ABORT on a Write
+
+`ABORT` closes the provisional window with a rejected outcome. It carries `reason`, `retryable`, and an optional `state` field.
+
+```json
+{
+  "signal": "ABORT",
+  "id": "arc_c7f29a1b",
+  "timestamp": 1718200032441,
+  "reason": "insufficient_funds",
+  "retryable": false,
+  "state": {
+    "accountBalance": "342.18",
+    "availableBalance": "298.40"
+  }
+}
+```
+
+**`reason`**: A machine-readable rejection reason. Write-specific reason values are defined in Section 13.4.
+
+**`retryable`**: Whether the same write may be retried. `false` for business-rule rejections (insufficient funds, invalid parameters). `true` for infrastructure failures (upstream timeout during commit).
+
+**`state`**: Optional. The authoritative resource state the client should revert to. Provides exactly the fields the client needs to undo the provisional render — not necessarily the full resource. If `state` is absent, the client must treat the resource as unconfirmed and initiate a direct fetch to recover ground truth.
+
+**Difference from read-side ABORT**: On reads, `state` is never present because the read never mutated anything. On writes, `state` is the server's correction of the client's provisional render — the "here is where you actually are" signal that makes silent client-side guessing unnecessary.
+
+**Client required behavior**: Revert provisional UI state. If `state` is present, apply it. If `state` is absent, mark resource as unconfirmed and initiate a direct fetch. Surface `reason` in the UI — do not silently revert. The user must be told what happened.
+
+#### 13.3.3 Write-Side ABORT Reason Values
+
+| Reason | Retryable | Description |
+|---|---|---|
+| `insufficient_funds` | false | Write rejected: sender lacks sufficient balance |
+| `invalid_parameters` | false | Write rejected: request parameters failed server validation |
+| `rate_limited` | true | Write rejected: client has exceeded request rate threshold |
+| `conflict` | false | Write rejected: resource was concurrently modified |
+| `upstream_timeout` | true | Commit did not finalize within `X-Antic-Max-Window` |
+| `upstream_error` | true | Upstream returned a non-2xx response during commit |
+| `write_conflict` | false | A concurrent provisional write is in-flight for this resource (see Section 13.5) |
+| `connection_lost` | true | SSE connection dropped; synthetic signal emitted by SDK |
+
+---
+
+### 13.4 New Request Header: `X-Antic-Write-Mode`
+
+Governs how the proxy handles concurrent provisional writes targeting the same resource.
+
+```http
+X-Antic-Write-Mode: exclusive
+```
+
+| Value | Behavior |
+|---|---|
+| `exclusive` | Default. Proxy rejects new write with `409 Conflict` and `X-Antic-State: write_rejected` if a provisional write is already in-flight for this resource. Client receives no `Reconcile-Id`; the rejection is synchronous. |
+| `independent` | Proxy accepts the write and issues a new `Reconcile-Id`. No ordering guarantee between concurrent writes. Use only when writes are known to be non-overlapping (e.g., writes to separate sub-resources). |
+
+`exclusive` is the required default. Proxies must not silently accept a second write while one is in-flight — the resulting state is undefined and the client cannot reason about it.
+
+---
+
+### 13.5 Concurrent Write Semantics
+
+When two provisional writes target the same resource before either confirms:
+
+**Under `exclusive` mode (default)**:
+- The second write is rejected synchronously with `409 Conflict`
+- Response headers include `X-Antic-State: write_rejected` and `X-Antic-Reconcile-Id` of the in-flight write
+- The client surfaces the conflict to the user immediately
+- No signal is emitted for the rejected write
+
+**Under `independent` mode**:
+- Both writes proceed with independent `Reconcile-Id` values
+- Each resolves independently via its own `CONFIRM` or `ABORT`
+- The proxy makes no ordering guarantees between them
+- If Write A's committed state conflicts with Write B's provisional assumption, Write B's eventual `CONFIRM` or `ABORT` carries the authoritative resolution
+
+Operators using `independent` mode accept full responsibility for write ordering correctness. The protocol expresses what happened; it does not prevent conflicts in independent mode.
+
+---
+
+### 13.6 Provisional Write Lifecycle
+
+```
+Client
+  │
+  │  POST /api/orders
+  │  X-Antic-Client-Id: <uuid>
+  │  X-Antic-Write-Mode: exclusive (default)
+  ▼
+Spec-Link Proxy
+  │
+  ├── Check in-flight write registry for this resource ──────────────────┐
+  │   If in-flight write exists (exclusive mode):                        │
+  │     Return 409 Conflict, X-Antic-State: write_rejected               │
+  │     (No signal emitted — rejection is synchronous)                   │
+  │                                                                      │
+  │   If no conflict:                                                    │
+  │     Register resource as write-locked                                │
+  │     Forward write to upstream                                        │
+  │     Await provisional acknowledgement                                │
+  │                                                                      │
+  ├── PROVISIONAL RESPONSE ─────────────────────────────────────────── Client
+  │   202 Accepted                                                       renders
+  │   X-Antic-State: provisional                                         provisional
+  │   X-Antic-Reconcile-Id: arc_c7f29a1b                                 state
+  │   X-Antic-Max-Window: 5000                                           immediately
+  │   { "status": "PENDING", "orderId": "...", ... }
+  │
+  ├── COMMIT TRACK (async) ─────────────────────────────────────────────┤
+  │   Await upstream commit confirmation                                  │
+  │   On commit success:                                                  │
+  │     Release write lock                                                │
+  │     Emit CONFIRM (with data if outcome differs from provisional)      │
+  │   On commit failure:                                                  │
+  │     Release write lock                                                │
+  │     Emit ABORT (with reason and state for revert)                    │
+  │   On timeout (X-Antic-Max-Window exceeded):                           │
+  │     Release write lock                                                │
+  │     Emit ABORT (reason: upstream_timeout, retryable: true)           │
+  │                                                                      │
+  │   Emit signal over /antic/signals SSE ─────────────────────────── Client
+  │                                                                      reconciles
+  ▼
+ Done
+```
+
+---
+
+### 13.7 Why This Requires v1.0
+
+Provisional writes require:
+
+1. **Durable write-lock registration**: The proxy must track in-flight writes across requests. An in-memory store is insufficient for multi-instance deployments.
+2. **Server-side provisional state persistence**: The provisional response body must be stored for potential revert if the SSE connection drops before ABORT is delivered.
+3. **Maximum uncertainty window SLAs**: Unlike reads (where a stale speculative response is merely imprecise), a provisional write that never confirms leaves real-world state (an order, a payment, an account update) in an undefined condition. The proxy must guarantee signal delivery or explicitly emit ABORT within the window.
+4. **Write-lock release guarantees**: Exclusive locks must be released on CONFIRM, ABORT, or timeout — never left dangling. Dangling locks require manual operator intervention.
+
+The read-side work in v0.2 builds the trust foundation in the signal vocabulary, delivery mechanism, and client SDK contract that provisional writes require before operators will trust the protocol with write semantics.
 
 ---
 
@@ -749,13 +937,14 @@ Provisional writes require durable signal delivery guarantees, server-side provi
 
 | Header | Required | Values | Description |
 |---|---|---|---|
-| `X-Antic-State` | Yes (speculative) | `speculative`, `confirmed` | Certainty state of this response |
-| `X-Antic-Reconcile-Id` | Yes (speculative) | Opaque string `arc_<hex>` | Links response to reconciliation signal |
+| `X-Antic-State` | Yes (speculative) | `speculative`, `confirmed`, `provisional`, `write_rejected` | Certainty state of this response |
+| `X-Antic-Reconcile-Id` | Yes (speculative/provisional) | Opaque string `arc_<hex>` | Links response to reconciliation signal |
 | `X-Antic-Staleness` | Yes (speculative) | Integer (ms) | Age of Vault entry at serve time |
 | `X-Antic-Volatility` | No | `field=level,...` | Per-field volatility hints, comma-separated key=value |
 | `X-Antic-Deferred-Fields` | No | Comma-separated names | Fields withheld pending Formal Track |
 | `X-Antic-Max-Window` | No | Integer (ms) | Maximum time client waits for signal |
 | `X-Antic-Client-Id` | No (request header) | UUID | Client sends to proxy for signal channel routing |
+| `X-Antic-Write-Mode` | No (request header) | `exclusive`, `independent` | Write concurrency mode. Default: `exclusive` |
 
 ---
 
@@ -785,14 +974,14 @@ Provisional writes require durable signal delivery guarantees, server-side provi
 
 | Signal | When Sent | Terminal | Client Action |
 |---|---|---|---|
-| `CONFIRM` | No diff, no deferred fields | Yes | Mark all SPECULATIVE fields confirmed |
-| `PATCH` | SPECULATIVE fields differ | No | Apply RFC 6902 ops |
-| `FILL` | DEFERRED fields now available | No | Merge fields into state |
-| `REPLACE` | Structural or threshold diff | Yes | Replace full resource state |
-| `ABORT` | Formal Track failed or integrity violation | Yes | Discard speculative state |
+| `CONFIRM` | No diff (read) / Commit succeeded (write) | Yes | Read: mark confirmed. Write: apply `data` if present, else confirm provisional as-is |
+| `PATCH` | SPECULATIVE fields differ (read only) | No | Apply RFC 6902 ops |
+| `FILL` | DEFERRED fields now available (read only) | No | Merge fields into state |
+| `REPLACE` | Structural or threshold diff (read only) | Yes | Replace full resource state |
+| `ABORT` | Formal Track failed / write rejected | Yes | Read: discard speculative. Write: revert provisional; apply `state` if present, else refetch |
 
 ---
 
-*Antic-PT Draft v0.2.1 — Incorporates resolutions for all open correctness gaps.*
+*Antic-PT Draft v0.2.2 — Section 13 Provisional Write Commits fully specified.*
 *Reference implementation: Spec-Link (Go), AnticipationResolver (JavaScript)*
 *License: MIT*
