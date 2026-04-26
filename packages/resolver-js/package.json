@@ -1,6 +1,6 @@
 {
   "name": "@antic-pt/resolver",
-  "version": "0.1.0",
+  "version": "0.2.2",
   "description": "Official JavaScript/TypeScript Resolver SDK for the Anticipation Protocol (Antic-PT)",
   "main": "dist/index.js",
   "module": "dist/index.mjs",

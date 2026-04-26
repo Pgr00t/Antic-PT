@@ -4,7 +4,7 @@
 
 help:
 	@echo ""
-	@echo "  Antic-PT v0.2.1 Development Commands"
+	@echo "  Antic-PT v0.2.2 Development Commands"
 	@echo ""
 	@echo "  make run          Start everything for demo (API server + Go proxy, seeded vault)"
 	@echo "  make build        Build the Spec-Link Go proxy binary"
