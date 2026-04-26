@@ -1,6 +1,6 @@
 # Antic-PT: Anticipation Protocol — Makefile
 
-.PHONY: help build test fmt lint run run-proxy run-api seed clean
+.PHONY: help build test fmt lint run run-proxy run-api seed clean demo stop
 
 help:
 	@echo ""
