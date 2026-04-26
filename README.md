@@ -40,12 +40,12 @@ make fmt           # Format the codebase
 The quickest way to see the "Certainty Layer" in action:
 
 **Read-Side (Real-time Ticker Reconciliation):**
-1. Run `make run`
+1. Run `make demo`
 2. Open `http://localhost:4000`
 3. Observe instantaneous UI rendering while the Formal Track updates underlying price changes.
 
 **Write-Side (Provisional Order Commit):**
-1. Run the write servers (see `./integrations/binance/write` scripts)
+1. Run `make demo`
 2. Open `http://localhost:4006`
 3. Place an order to see instantaneous `202 Provisional` UI updates, followed by authoritative `CONFIRM` or `ABORT` corrections.
 

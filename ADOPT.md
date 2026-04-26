@@ -8,11 +8,10 @@ This guide is for the first engineer integrating Antic-PT into a real-world proj
 Before pointing Spec-Link at your own infrastructure, we recommend running the local Binance demo to see the lifecycle in action. 
 
 ```bash
-git clone https://github.com/Pgr00t/Antic-PT.git
 cd Antic-PT
-make run
+make demo
 ```
-Open `http://localhost:4000` to see real-time surgical reconciliations against the live Binance API. This takes 30 seconds and proves the proxy works on your machine.
+Open `http://localhost:4000` (Read Dashboard) and `http://localhost:4006` (Write Dashboard) to see real-time surgical reconciliations and provisional commits in action.
 
 ---
 
@@ -131,7 +130,7 @@ Open Chrome DevTools -> Network Tab.
 
 ---
 
-## 5. Current Limitations (v0.2.1)
+## 5. Current Limitations (v0.2.2)
 
 Before you deploy this past your local machine, you must understand what Spec-Link *cannot* do right now.
 
