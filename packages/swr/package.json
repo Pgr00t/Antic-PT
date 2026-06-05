@@ -1,0 +1,23 @@
+{
+  "name": "@antic-pt/swr",
+  "version": "0.2.2",
+  "description": "SWR integration for Anticipation Protocol",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc"
+  },
+  "peerDependencies": {
+    "react": "^18.0.0 || ^19.0.0",
+    "swr": "^2.0.0"
+  },
+  "dependencies": {
+    "@antic-pt/resolver": "file:../resolver"
+  },
+  "devDependencies": {
+    "@types/react": "^19.2.16",
+    "react": "^19.2.7",
+    "swr": "^2.4.1",
+    "typescript": "^6.0.3"
+  }
+}

@@ -19,3 +19,4 @@ package-lock.json
 # Build outputs
 dist/
 .parcel-cache/
+*.tgz
