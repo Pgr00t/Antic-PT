@@ -14,15 +14,15 @@
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
-export type VolatilityLevel = 'high' | 'low' | 'invariant';
+export type VolatilityLevel = "high" | "low" | "invariant";
 
 export type ResolverStatus =
-  | 'idle'
-  | 'speculative'
-  | 'patching'
-  | 'filling'
-  | 'confirmed'
-  | 'error';
+  | "idle"
+  | "speculative"
+  | "patching"
+  | "filling"
+  | "confirmed"
+  | "error";
 
 /** Metadata attached to every speculative response, parsed from X-Antic-* headers. */
 export interface ResolverMeta {
@@ -47,18 +47,18 @@ export interface ResolverOptions {
   /** Maximum ms to wait for a reconciliation signal before falling back. Default: 3000. */
   maxWindow?: number;
   /** What to do when X-Antic-Max-Window expires without a signal. Default: "refetch". */
-  onTimeout?: 'refetch' | 'error';
+  onTimeout?: "refetch" | "error";
 }
 
 export interface AbandonMeta {
   reconciledId: string;
-  reason: 'timeout' | 'connection_lost';
+  reason: "timeout" | "connection_lost";
   elapsed: number;
   resource: string;
 }
 
 export type PatchOp = {
-  op: 'add' | 'remove' | 'replace' | 'move' | 'copy' | 'test';
+  op: "add" | "remove" | "replace" | "move" | "copy" | "test";
   path: string;
   value?: unknown;
   from?: string;
@@ -82,7 +82,7 @@ type Handlers = {
 
 /** Returns a stable per-client UUID, persisted in localStorage when available. */
 function getClientId(): string {
-  const KEY = '__antic_client_id';
+  const KEY = "__antic_client_id";
   try {
     const stored = localStorage.getItem(KEY);
     if (stored) return stored;
@@ -96,12 +96,14 @@ function getClientId(): string {
 
 function generateId(): string {
   const bytes = new Uint8Array(16);
-  if (typeof crypto !== 'undefined' && crypto.getRandomValues) {
+  if (typeof crypto !== "undefined" && crypto.getRandomValues) {
     crypto.getRandomValues(bytes);
   } else {
     for (let i = 0; i < 16; i++) bytes[i] = Math.floor(Math.random() * 256);
   }
-  return Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join('');
+  return Array.from(bytes)
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
 }
 
 // ── Signal Channel ─────────────────────────────────────────────────────────────
@@ -134,11 +136,17 @@ class SignalChannel {
   }
 
   private connect(): void {
-    if (typeof EventSource === 'undefined') return; // SSR / non-browser
+    if (typeof EventSource === "undefined") return; // SSR / non-browser
 
     this.es = new EventSource(this.url);
 
-    const SIGNAL_EVENTS = ['patch', 'fill', 'confirm', 'replace', 'abort'] as const;
+    const SIGNAL_EVENTS = [
+      "patch",
+      "fill",
+      "confirm",
+      "replace",
+      "abort",
+    ] as const;
 
     for (const evType of SIGNAL_EVENTS) {
       this.es.addEventListener(evType, (e: Event) => {
@@ -158,7 +166,7 @@ class SignalChannel {
     this.es.onerror = () => {
       // Emit synthetic connection_lost abort to all active handlers.
       this.handlers.forEach((handler) => {
-        handler('abort', { reason: 'connection_lost', retryable: true });
+        handler("abort", { reason: "connection_lost", retryable: true });
       });
       // EventSource will auto-reconnect; clear stale handlers only if it fails permanently.
     };
@@ -177,11 +185,13 @@ class SignalChannel {
  * Parses X-Antic-Volatility: "cpuUsage=high, uptimeDays=low, region=invariant"
  * into a field-keyed map.
  */
-function parseVolatility(header: string | null): Record<string, VolatilityLevel> {
+function parseVolatility(
+  header: string | null,
+): Record<string, VolatilityLevel> {
   const result: Record<string, VolatilityLevel> = {};
   if (!header) return result;
-  for (const part of header.split(',')) {
-    const [key, val] = part.trim().split('=');
+  for (const part of header.split(",")) {
+    const [key, val] = part.trim().split("=");
     if (key && val) {
       result[key.trim()] = val.trim() as VolatilityLevel;
     }
@@ -195,7 +205,10 @@ function parseVolatility(header: string | null): Record<string, VolatilityLevel>
  */
 function parseDeferredFields(header: string | null): string[] {
   if (!header || !header.trim()) return [];
-  return header.split(',').map(s => s.trim()).filter(Boolean);
+  return header
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
 }
 
 // ── AnticipationResolver ───────────────────────────────────────────────────────
@@ -225,11 +238,11 @@ export class AnticipationResolver {
   private readonly path: string;
   private readonly baseUrl: string;
   private readonly maxWindow: number;
-  private readonly onTimeout: 'refetch' | 'error';
+  private readonly onTimeout: "refetch" | "error";
   private readonly clientId: string;
 
   private handlers: Handlers = {};
-  private status: ResolverStatus = 'idle';
+  private status: ResolverStatus = "idle";
   public meta: ResolverMeta | null = null;
 
   // State for FILL-before-PATCH buffering (spec §9.4, §11.6)
@@ -242,14 +255,19 @@ export class AnticipationResolver {
 
   constructor(path: string, options: ResolverOptions = {}) {
     this.path = path;
-    this.baseUrl = options.baseUrl ?? (typeof window !== 'undefined' ? window.location.origin : '');
+    this.baseUrl =
+      options.baseUrl ??
+      (typeof window !== "undefined" ? window.location.origin : "");
     this.maxWindow = options.maxWindow ?? 3000;
-    this.onTimeout = options.onTimeout ?? 'refetch';
+    this.onTimeout = options.onTimeout ?? "refetch";
     this.clientId = getClientId();
   }
 
   /** Register an event handler. */
-  on<K extends keyof EventMap>(event: K, handler: (...args: EventMap[K]) => void): this {
+  on<K extends keyof EventMap>(
+    event: K,
+    handler: (...args: EventMap[K]) => void,
+  ): this {
     (this.handlers as any)[event] = handler;
     return this;
   }
@@ -263,7 +281,7 @@ export class AnticipationResolver {
   /** Fetch the resource speculatively. */
   async fetch(): Promise<void> {
     this.cleanup();
-    this.status = 'idle';
+    this.status = "idle";
 
     const url = `${this.baseUrl}${this.path}`;
 
@@ -271,19 +289,19 @@ export class AnticipationResolver {
     try {
       response = await globalThis.fetch(url, {
         headers: {
-          'Accept': 'application/json',
-          'X-Antic-Client-Id': this.clientId,
+          Accept: "application/json",
+          "X-Antic-Client-Id": this.clientId,
         },
       });
     } catch {
-      this.emit('abort', 'network_error', true);
-      this.status = 'error';
+      this.emit("abort", "network_error", true);
+      this.status = "error";
       return;
     }
 
     if (!response.ok) {
-      this.emit('abort', `http_${response.status}`, response.status >= 500);
-      this.status = 'error';
+      this.emit("abort", `http_${response.status}`, response.status >= 500);
+      this.status = "error";
       return;
     }
 
@@ -291,38 +309,50 @@ export class AnticipationResolver {
     try {
       data = await response.json();
     } catch {
-      this.emit('abort', 'parse_error', false);
-      this.status = 'error';
+      this.emit("abort", "parse_error", false);
+      this.status = "error";
       return;
     }
 
-    const state = response.headers.get('X-Antic-State');
+    const state = response.headers.get("X-Antic-State");
 
     // ── Confirmed (cold miss / stale) — no signal forthcoming ────────────────
-    if (state === 'confirmed' || !state) {
+    if (state === "confirmed" || !state) {
       this.meta = {
         staleness: 0,
-        reconciledId: '',
+        reconciledId: "",
         volatility: {},
         deferredFields: [],
-        endpointVolatility: 'low',
+        endpointVolatility: "low",
       };
-      this.status = 'confirmed';
-      this.emit('speculative', data, this.meta);
-      this.emit('confirm');
+      this.status = "confirmed";
+      this.emit("speculative", data, this.meta);
+      this.emit("confirm");
       return;
     }
 
     // ── Speculative — subscribe to signal channel ────────────────────────────
-    const reconcileId = response.headers.get('X-Antic-Reconcile-Id') ?? '';
-    const staleness = parseInt(response.headers.get('X-Antic-Staleness') ?? '0', 10);
-    const maxWindowHeader = parseInt(response.headers.get('X-Antic-Max-Window') ?? String(this.maxWindow), 10);
-    const volatility = parseVolatility(response.headers.get('X-Antic-Volatility'));
-    this.deferredFields = parseDeferredFields(response.headers.get('X-Antic-Deferred-Fields'));
+    const reconcileId = response.headers.get("X-Antic-Reconcile-Id") ?? "";
+    const staleness = parseInt(
+      response.headers.get("X-Antic-Staleness") ?? "0",
+      10,
+    );
+    const maxWindowHeader = parseInt(
+      response.headers.get("X-Antic-Max-Window") ?? String(this.maxWindow),
+      10,
+    );
+    const volatility = parseVolatility(
+      response.headers.get("X-Antic-Volatility"),
+    );
+    this.deferredFields = parseDeferredFields(
+      response.headers.get("X-Antic-Deferred-Fields"),
+    );
 
     // Infer endpoint-level volatility: most common value, or 'low'.
     const vals = Object.values(volatility);
-    const endpointVolatility = (vals.filter(v => v === 'high').length > vals.length / 2 ? 'high' : 'low') as VolatilityLevel;
+    const endpointVolatility = (
+      vals.filter((v) => v === "high").length > vals.length / 2 ? "high" : "low"
+    ) as VolatilityLevel;
 
     this.meta = {
       staleness,
@@ -332,21 +362,24 @@ export class AnticipationResolver {
       endpointVolatility,
     };
 
-    this.status = 'speculative';
-    this.emit('speculative', data, this.meta);
+    this.status = "speculative";
+    this.emit("speculative", data, this.meta);
 
     if (!reconcileId) {
       // No Reconcile ID — cannot receive signals. Treat as confirmed.
-      this.status = 'confirmed';
-      this.emit('confirm');
+      this.status = "confirmed";
+      this.emit("confirm");
       return;
     }
 
     // Subscribe to the shared signal channel.
     const channel = SignalChannel.getInstance(this.baseUrl, this.clientId);
-    this.unsubscribeSignal = channel.subscribe(reconcileId, (event, payload) => {
-      this.handleSignal(event, payload);
-    });
+    this.unsubscribeSignal = channel.subscribe(
+      reconcileId,
+      (event, payload) => {
+        this.handleSignal(event, payload);
+      },
+    );
 
     // Start max-window timer.
     const effectiveWindow = Math.min(maxWindowHeader, this.maxWindow);
@@ -354,16 +387,16 @@ export class AnticipationResolver {
       this.cleanup();
       const meta: AbandonMeta = {
         reconciledId: reconcileId,
-        reason: 'timeout',
+        reason: "timeout",
         elapsed: effectiveWindow,
         resource: this.path,
       };
-      this.emit('speculationAbandoned', meta);
-      if (this.onTimeout === 'refetch') {
+      this.emit("speculationAbandoned", meta);
+      if (this.onTimeout === "refetch") {
         this.refetch();
       } else {
-        this.emit('abort', 'timeout', true);
-        this.status = 'error';
+        this.emit("abort", "timeout", true);
+        this.status = "error";
       }
     }, effectiveWindow);
   }
@@ -376,9 +409,9 @@ export class AnticipationResolver {
   /** Handle a signal received from the signal channel. */
   private handleSignal(event: string, data: any): void {
     switch (event) {
-      case 'patch': {
-        this.status = 'patching';
-        this.emit('patch', data.ops ?? []);
+      case "patch": {
+        this.status = "patching";
+        this.emit("patch", data.ops ?? []);
 
         // If FILL was buffered (arrived before PATCH), emit it now in order.
         if (this.pendingFill !== null) {
@@ -386,8 +419,8 @@ export class AnticipationResolver {
             clearTimeout(this.fillBufferTimer);
             this.fillBufferTimer = null;
           }
-          this.status = 'filling';
-          this.emit('fill', this.pendingFill);
+          this.status = "filling";
+          this.emit("fill", this.pendingFill);
           this.pendingFill = null;
           this.finalize();
           return;
@@ -401,47 +434,51 @@ export class AnticipationResolver {
         break;
       }
 
-      case 'fill': {
+      case "fill": {
         const fields: Record<string, any> = data.fields ?? {};
 
-        if (this.status === 'speculative') {
+        if (this.status === "speculative") {
           // FILL arrived before PATCH (spec §11.6) — buffer for 50ms.
           this.pendingFill = fields;
           this.fillBufferTimer = setTimeout(() => {
             // PATCH never arrived within window; emit FILL directly.
-            this.status = 'filling';
-            this.emit('fill', this.pendingFill ?? {});
+            this.status = "filling";
+            this.emit("fill", this.pendingFill ?? {});
             this.pendingFill = null;
             this.finalize();
           }, 50);
         } else {
           // Normal order: FILL after PATCH.
-          this.status = 'filling';
-          this.emit('fill', fields);
+          this.status = "filling";
+          this.emit("fill", fields);
           this.finalize();
         }
         break;
       }
 
-      case 'confirm': {
-        this.emit('confirm');
+      case "confirm": {
+        this.emit("confirm");
         this.finalize();
         break;
       }
 
-      case 'replace': {
-        this.emit('replace', data.data ?? data);
+      case "replace": {
+        this.emit("replace", data.data ?? data);
         this.finalize();
         break;
       }
 
-      case 'abort': {
-        const reason: string = data.reason ?? 'unknown';
+      case "abort": {
+        const reason: string = data.reason ?? "unknown";
         const retryable: boolean = data.retryable ?? false;
         this.cleanup();
-        this.status = 'error';
-        this.emit('abort', reason, retryable);
-        if (retryable && this.onTimeout === 'refetch' && reason !== 'connection_lost') {
+        this.status = "error";
+        this.emit("abort", reason, retryable);
+        if (
+          retryable &&
+          this.onTimeout === "refetch" &&
+          reason !== "connection_lost"
+        ) {
           setTimeout(() => this.refetch(), 100);
         }
         break;
@@ -451,7 +488,7 @@ export class AnticipationResolver {
 
   /** Finalize: mark as confirmed, clear timers, unsubscribe from signal channel. */
   private finalize(): void {
-    this.status = 'confirmed';
+    this.status = "confirmed";
     this.cleanup();
   }
 
@@ -473,13 +510,16 @@ export class AnticipationResolver {
   }
 
   /** Apply RFC 6902 JSON Patch operations to a data object. Returns the patched copy. */
-  static applyPatch(data: Record<string, any>, ops: PatchOp[]): Record<string, any> {
+  static applyPatch(
+    data: Record<string, any>,
+    ops: PatchOp[],
+  ): Record<string, any> {
     const result = { ...data };
     for (const op of ops) {
-      const field = op.path.replace(/^\//, '');
-      if (op.op === 'replace' || op.op === 'add') {
+      const field = op.path.replace(/^\//, "");
+      if (op.op === "replace" || op.op === "add") {
         result[field] = op.value;
-      } else if (op.op === 'remove') {
+      } else if (op.op === "remove") {
         delete result[field];
       }
     }

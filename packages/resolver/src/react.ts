@@ -8,8 +8,14 @@
  * bundles. It is provided as an optional peer-dependency wrapper for React codebases.
  */
 
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { AnticipationResolver, ResolverMeta, ResolverOptions, ResolverStatus, PatchOp } from './resolver';
+import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  AnticipationResolver,
+  ResolverMeta,
+  ResolverOptions,
+  ResolverStatus,
+  PatchOp,
+} from "./resolver";
 
 export interface UseAnticipationResult {
   /** Current speculative (or confirmed) resource data. */
@@ -48,11 +54,11 @@ export interface UseAnticipationResult {
  */
 export function useAnticipation(
   path: string,
-  options?: ResolverOptions
+  options?: ResolverOptions,
 ): UseAnticipationResult {
   const [data, setData] = useState<Record<string, any> | null>(null);
   const [meta, setMeta] = useState<ResolverMeta | null>(null);
-  const [status, setStatus] = useState<ResolverStatus>('idle');
+  const [status, setStatus] = useState<ResolverStatus>("idle");
   const [deferredFields, setDeferredFields] = useState<string[]>([]);
 
   // Keep a stable ref to the current data so patch operations can close over it.
@@ -65,23 +71,23 @@ export function useAnticipation(
     resolverRef.current = resolver;
 
     resolver
-      .on('speculative', (incoming, m) => {
+      .on("speculative", (incoming, m) => {
         dataRef.current = incoming;
         setData(incoming);
         setMeta(m);
         setDeferredFields(m.deferredFields);
-        setStatus('speculative');
+        setStatus("speculative");
       })
-      .on('patch', (ops: PatchOp[]) => {
-        setStatus('patching');
+      .on("patch", (ops: PatchOp[]) => {
+        setStatus("patching");
         if (dataRef.current) {
           const patched = AnticipationResolver.applyPatch(dataRef.current, ops);
           dataRef.current = patched;
           setData({ ...patched });
         }
       })
-      .on('fill', (fields) => {
-        setStatus('filling');
+      .on("fill", (fields) => {
+        setStatus("filling");
         if (dataRef.current) {
           const merged = { ...dataRef.current, ...fields };
           dataRef.current = merged;
@@ -89,20 +95,22 @@ export function useAnticipation(
         }
         setDeferredFields([]);
       })
-      .on('confirm', () => {
-        setStatus('confirmed');
+      .on("confirm", () => {
+        setStatus("confirmed");
       })
-      .on('replace', (incoming) => {
+      .on("replace", (incoming) => {
         dataRef.current = incoming;
         setData(incoming);
         setDeferredFields([]);
-        setStatus('confirmed');
+        setStatus("confirmed");
       })
-      .on('abort', (reason, retryable) => {
-        setStatus('error');
-        console.warn(`[useAnticipation] abort: ${reason} (retryable=${retryable})`);
+      .on("abort", (reason, retryable) => {
+        setStatus("error");
+        console.warn(
+          `[useAnticipation] abort: ${reason} (retryable=${retryable})`,
+        );
       })
-      .on('speculationAbandoned', (m) => {
+      .on("speculationAbandoned", (m) => {
         console.warn(`[useAnticipation] speculation abandoned: ${m.reason}`);
       });
 
