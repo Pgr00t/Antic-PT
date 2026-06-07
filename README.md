@@ -19,35 +19,23 @@ Unlike traditional caching, Antic-PT provides **Field-Level Reconciliation** for
 ## Structure
 
 * [`ANTIC-PT-SPEC.md`](./ANTIC-PT-SPEC.md) - The formal protocol specification (v0.2.2).
-* [`ADOPT.md`](./ADOPT.md) - The 60-Minute Integration Guide for adopting Spec-Link.
-* [`spec-link/`](./spec-link) - High-performance Go middleware proxy implementing the read/write track logic.
-* [`packages/resolver-js/`](./packages/resolver-js) - Standard JS SDK for stateful reconciliation.
-* [`integrations/binance/`](./integrations/binance) - Real-world demonstrations against the live Binance API (Read & Write side).
-
-## Development Commands
-
-Use the root `Makefile` for a consolidated workflow:
-
-```bash
-make build         # Build the Spec-Link proxy
-make run           # Start the full demo stack (Proxy :4000 + Upstream :4001)
-make test          # Run all tests
-make fmt           # Format the codebase
-```
+* [`ADOPT.md`](./ADOPT.md) - The 60-Minute Integration Guide for adopting Edge Proxy.
+* [`packages/edge-proxy/`](./packages/edge-proxy) - High-performance Node middleware proxy implementing the read/write track logic with Fast-JSON-Patch and Upstash Redis.
+* [`packages/resolver/`](./packages/resolver) - Standard JS SDK for stateful reconciliation.
+* [`packages/react-query/`](./packages/react-query) - React Query integration hook for Antic-PT.
+* [`packages/swr/`](./packages/swr) - SWR integration hook for Antic-PT.
+* [`demo/react-test/`](./demo/react-test) - React testing application demonstrating the Edge Proxy.
 
 ## Running the Demo
 
 The quickest way to see the "Certainty Layer" in action:
 
-**Read-Side (Real-time Ticker Reconciliation):**
-1. Run `make demo`
-2. Open `http://localhost:4000`
-3. Observe instantaneous UI rendering while the Formal Track updates underlying price changes.
-
-**Write-Side (Provisional Order Commit):**
-1. Run `make demo`
-2. Open `http://localhost:4006`
-3. Place an order to see instantaneous `202 Provisional` UI updates, followed by authoritative `CONFIRM` or `ABORT` corrections.
+**React Demo:**
+1. Navigate to the demo directory: `cd demo/react-test`
+2. Install dependencies: `npm install`
+3. Start the dev server: `npm run dev`
+4. Open the displayed localhost URL.
+5. Observe instantaneous UI rendering while the Formal Track updates underlying price changes.
 
 ## Architecture
 
@@ -57,10 +45,10 @@ The quickest way to see the "Certainty Layer" in action:
 │       │                                                      │
 │  GET /spec/dashboard/1                                       │
 │       ▼                                                      │
-│  ┌─────────────┐                                             │
-│  │  Spec-Link  │ ─── FORK ───────────────────────┐           │
-│  │  (Proxy)    │                                 │           │
-│  └─────────────┘                                 │           │
+│  ┌──────────────┐                                            │
+│  │  Edge Proxy  │ ─── FORK ───────────────────────┐           │
+│  │              │                                 │           │
+│  └──────────────┘                                 │           │
 │       │                                          │           │
 │  FAST TRACK (~10ms)                FORMAL TRACK (~350ms)     │
 │  Serve Speculative ───────────────► Query Authoritative DB   │

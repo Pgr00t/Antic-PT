@@ -15,7 +15,7 @@ Antic-PT does not replace HTTP caching. It replaces the silence that follows it.
 
 ## Status of This Document
 
-Draft v0.2.2. Not yet submitted for standardization. Reference implementation available as Spec-Link (Go proxy) and AnticipationResolver (JavaScript SDK). Section 13 (Provisional Write Commits) is fully specified; implementation targets v1.0.
+Draft v0.2.2. Not yet submitted for standardization. Reference implementation available as Edge Proxy (Node.js) and @antic-pt/resolver (JavaScript SDK). Section 13 (Provisional Write Commits) is fully specified; implementation targets v1.0.
 
 ---
 
@@ -30,7 +30,7 @@ Draft v0.2.2. Not yet submitted for standardization. Reference implementation av
 7. Signal Delivery Order
 8. The Dual-Track Request Lifecycle
 9. Client SDK Contract
-10. Spec-Link Proxy Behavior
+10. Edge Proxy Proxy Behavior
 11. Failure Modes and Required Behavior
 12. Scope and Non-Goals
 13. Future Extension: Provisional Write Commits
@@ -179,9 +179,9 @@ Reserved for write-path use (see Section 13). On read paths, treat as DEFERRED.
 
 ### 4.5 Field Class Declaration
 
-Field classes are declared in Spec-Link proxy configuration. Upstream services require zero changes.
+Field classes are declared in Edge Proxy proxy configuration. Upstream services require zero changes.
 
-**Spec-Link configuration example:**
+**Edge Proxy configuration example:**
 
 ```yaml
 endpoints:
@@ -426,7 +426,7 @@ Client
   │
   │  GET /spec/resource/id
   ▼
-Spec-Link Proxy
+Edge Proxy Proxy
   │
   ├──── FAST TRACK ────────────────────────────────────────────┐
   │     Check State Vault for resource/id                      │
@@ -462,7 +462,7 @@ Spec-Link Proxy
 
 ### 8.1 Cold Vault / Stale Behavior
 
-When no State Vault entry exists, or the entry exceeds `max_staleness_ms`, Spec-Link proxies directly to upstream, returns the response with `X-Antic-State: confirmed`, and populates the State Vault. No Reconcile ID is issued. No signal is sent.
+When no State Vault entry exists, or the entry exceeds `max_staleness_ms`, Edge Proxy proxies directly to upstream, returns the response with `X-Antic-State: confirmed`, and populates the State Vault. No Reconcile ID is issued. No signal is sent.
 
 ### 8.2 Signal Channel
 
@@ -578,7 +578,7 @@ Silent fallback to direct fetch without this event is not permitted.
 
 ---
 
-## 10. Spec-Link Proxy Behavior
+## 10. Edge Proxy Proxy Behavior
 
 ### 10.1 State Vault
 
@@ -591,7 +591,7 @@ Silent fallback to direct fetch without this event is not permitted.
 
 ### 10.2 Vault Snapshot Capture
 
-At the moment Spec-Link begins serving a Fast Track response, it captures an immutable Vault Snapshot keyed to the request's Reconcile ID. This snapshot is the sole diff baseline for that request's Formal Track. The live State Vault entry may be updated by concurrent requests before this Formal Track completes — the snapshot is unaffected.
+At the moment Edge Proxy begins serving a Fast Track response, it captures an immutable Vault Snapshot keyed to the request's Reconcile ID. This snapshot is the sole diff baseline for that request's Formal Track. The live State Vault entry may be updated by concurrent requests before this Formal Track completes — the snapshot is unaffected.
 
 ### 10.3 REPLACE Threshold Evaluation
 
@@ -613,7 +613,7 @@ else:
 
 ### 10.4 Signal Delivery Guarantee
 
-Spec-Link emits exactly one terminal signal sequence per in-flight Fast Track response. A terminal sequence ends with CONFIRM, REPLACE, or ABORT. PATCH and FILL are non-terminal and must be followed by no further signals for that Reconcile ID.
+Edge Proxy emits exactly one terminal signal sequence per in-flight Fast Track response. A terminal sequence ends with CONFIRM, REPLACE, or ABORT. PATCH and FILL are non-terminal and must be followed by no further signals for that Reconcile ID.
 
 ### 10.5 SSE Signal Channel (`/antic/signals`)
 
@@ -862,7 +862,7 @@ Client
   │  X-Antic-Client-Id: <uuid>
   │  X-Antic-Write-Mode: exclusive (default)
   ▼
-Spec-Link Proxy
+Edge Proxy Proxy
   │
   ├── Check in-flight write registry for this resource ──────────────────┐
   │   If in-flight write exists (exclusive mode):                        │
@@ -960,7 +960,7 @@ The read-side work in v0.2 builds the trust foundation in the signal vocabulary,
 
 | Key | Scope | Default | Description |
 |---|---|---|---|
-| `port` | global | `4000` | Port Spec-Link listens on |
+| `port` | global | `4000` | Port Edge Proxy listens on |
 | `prefix` | global | `/spec` | URL prefix that triggers Antic-PT logic |
 | `vault.driver` | global | `memory` | State Vault backend: `memory` or `redis` |
 | `vault.default_ttl_ms` | global | `30000` | Default vault entry TTL in milliseconds |
@@ -991,5 +991,5 @@ The read-side work in v0.2 builds the trust foundation in the signal vocabulary,
 ---
 
 *Antic-PT Draft v0.2.2 — Section 13 Provisional Write Commits fully specified.*
-*Reference implementation: Spec-Link (Go), AnticipationResolver (JavaScript)*
+*Reference implementation: Edge Proxy (Go), AnticipationResolver (JavaScript)*
 *License: MIT*

@@ -22,28 +22,24 @@ Changes to `ANTIC-PT-SPEC.md` are the highest-value contributions. If you've fou
 2. If consensus is reached, update the spec and any affected reference implementations in the same PR.
 3. Include a test case or demo scenario that demonstrates the edge case.
 
-### Proxy Contributions (`spec-link/`)
-- Written in Go. Requires Go 1.21+.
-- All protocol-relevant behavior must be tested: `go test ./...`
-- Run `go fmt ./...` before committing. PRs with formatting drift will not be merged.
-- Do not introduce new dependencies without discussion. The proxy is intentionally minimal.
+### Proxy Contributions (`packages/edge-proxy/`)
+- Written in TypeScript (Node).
+- All protocol-relevant behavior must be tested. Run tests via `npm run test` in the package folder.
+- Do not introduce new heavy runtime dependencies without discussion.
 
-### SDK Contributions (`packages/resolver-js/`)
-- Written in TypeScript. Requires Node 20+ for the build toolchain (`tsup`, `vitest`).
+### SDK Contributions (`packages/resolver/`)
+- Written in TypeScript.
 - The SDK must remain zero-dependency at runtime. No `node_modules` in the browser bundle.
 - Build: `npm run build` — produces ESM, CJS, and IIFE bundles.
 - All exported API surface must be typed.
 
-### Ecosystem Bindings (new)
-SDK bindings for other languages and frameworks are welcome:
-- **React hook** — `packages/resolver-js/src/react.ts` is the reference. Follow same event contract.
-- **Vue / Svelte composables** — follow the same `on('speculative')` / `on('confirm')` pattern.
-- **Python / Go / Rust client SDKs** — treat `ANTIC-PT-SPEC.md` §9 as the contract.
-- **GraphQL / tRPC bindings** — community extensions; document as such.
+### Ecosystem Bindings
+SDK bindings for frameworks are available in the repository:
+- **React Query hook** — `packages/react-query/`
+- **SWR hook** — `packages/swr/`
 
-### Demo Contributions (`demo/`)
-- The demo server is Node.js (Express). Keep it simple and illustrative.
-- The demo UI is vanilla HTML/CSS/JS — no framework.
+### Demo Contributions (`demo/react-test/`)
+- The demo UI is built with React and Vite/Parcel.
 - Demo changes should showcase protocol behavior, not UI polish.
 
 ---
@@ -60,40 +56,22 @@ SDK bindings for other languages and frameworks are welcome:
 
 ## Development Setup
 
-### Proxy (Go)
+### Monorepo Setup
 
 ```bash
-cd spec-link
-go build ./...          # build
-go test ./...           # unit tests (no Redis required, except integration tests)
-go fmt ./...            # format
-```
-
-### JS SDK
-
-```bash
-cd packages/resolver-js
-npm install
-npm run build           # produces dist/index.{js,mjs,global.js}
+# We recommend using npm to install dependencies in individual workspaces:
+cd packages/edge-proxy && npm install
+cd ../resolver && npm install
+cd ../react-query && npm install
+cd ../swr && npm install
 ```
 
 ### Demo
 
 ```bash
-# Terminal 1 — upstream demo server (Node)
-cd demo/server && node index.js
-
-# Terminal 2 — Spec-Link proxy
-./bin/spec-link -config spec-link/antic-pt.yaml
-
-# Browser
-open demo/client/index.html
-```
-
-Or use the Makefile shortcut:
-
-```bash
-make run    # starts both demo server and proxy concurrently
+cd demo/react-test
+npm install
+npm run dev
 ```
 
 ---

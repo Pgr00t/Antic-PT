@@ -1,117 +1,129 @@
 # Adopting Antic-PT: The 60-Minute Integration Guide
 
-This guide is for the first engineer integrating Antic-PT into a real-world project. The goal is to get **Spec-Link** running in front of your existing REST API and verify the dual-track lifecycle without changing any of your backend code.
+This guide is for the first engineer integrating Antic-PT into a real-world project. The goal is to get **Edge Proxy** running in front of your existing REST API and verify the dual-track lifecycle without changing any of your backend code.
 
 ---
 
 ## 0. The "Try It First" Working Example
-Before pointing Spec-Link at your own infrastructure, we recommend running the local Binance demo to see the lifecycle in action. 
+Before pointing Edge Proxy at your own infrastructure, we recommend running the local React demo to see the lifecycle in action. 
 
 ```bash
-cd Antic-PT
-make demo
+cd demo/react-test
+npm install
+npm run dev
 ```
-Open `http://localhost:4000` (Read Dashboard) and `http://localhost:4006` (Write Dashboard) to see real-time surgical reconciliations and provisional commits in action.
+Open the localhost URL shown in your terminal to see real-time surgical reconciliations.
 
 ---
 
-## 1. Get the Proxy (Spec-Link)
+## 1. Get the Edge Proxy
 
-Spec-Link is a Go-based middleware proxy. It sits between your clients and your upstream API.
+Edge Proxy is a Node-based middleware proxy. It sits between your clients and your upstream API.
 
-### Build from source
 ```bash
-# From the Antic-PT root directory:
-cd spec-link
-go build -o spec-link main.go
+# In your project, install the proxy:
+npm install @antic-pt/edge-proxy
 ```
 
 ---
 
 ## 2. The Minimum Viable Config
 
-Create `antic-pt.yaml` in your project root. This tells Spec-Link where your API is and how to treat your endpoints. Note the explicit field mapping syntax.
+Create a file `proxy.ts` in your project. This tells Edge Proxy where your API is and how to connect to the SSE pub/sub system (e.g. Upstash Redis).
 
-```yaml
-prefix: "/spec"  # The path prefix Spec-Link will intercept
-vault:
-  driver: "memory"
-  default_ttl_ms: 60000
+```typescript
+import { EdgeProxy, RedisPubSub } from '@antic-pt/edge-proxy';
 
-formal_track:
-  upstream: "https://your-api.com"  # Your real backend
-  timeout_ms: 5000
+// 1. Initialize PubSub (using Upstash Redis for serverless support)
+const pubsub = new RedisPubSub({
+  url: process.env.UPSTASH_REDIS_REST_URL,
+  token: process.env.UPSTASH_REDIS_REST_TOKEN,
+});
 
-reconciliation:
-  strategy: "patch"
+// 2. Initialize Proxy
+const proxy = new EdgeProxy({
+  pubsub,
+  upstreamUrl: 'https://your-real-api.com' // Your real backend
+});
 
-# Start with ONE read-heavy endpoint
-endpoints:
-  - path: "/v1/dashboard"
-    method: "GET"
-    fields:
-      user_name:
-        class: "SPECULATIVE"
-      account_status:
-        class: "SPECULATIVE"
-      real_time_balance:
-        class: "DEFERRED"
-      sensitive_token:
-        class: "DEFERRED"
-```
+// 3. Mount in your server (e.g. Express)
+import express from 'express';
+const app = express();
 
-**Run it:**
-```bash
-./spec-link -config antic-pt.yaml
-# Proxy is now running on http://localhost:4002
+// Handle speculative reads
+app.get('/spec/*', async (req, res) => {
+  const proxyReq = new Request(`http://localhost${req.url}`, {
+    method: req.method,
+    headers: req.headers as HeadersInit
+  });
+  
+  const targetPath = req.path.replace('/spec', '');
+  const response = await proxy.handleSpeculation(proxyReq, targetPath);
+  
+  response.headers.forEach((val, key) => res.setHeader(key, val));
+  res.status(response.status).send(await response.text());
+});
+
+// Handle Signal Stream (SSE)
+app.get('/antic/signals', async (req, res) => {
+  const proxyReq = new Request(`http://localhost${req.url}`, {
+    headers: req.headers as HeadersInit
+  });
+  
+  const response = await proxy.handleSignalStream(proxyReq);
+  response.headers.forEach((val, key) => res.setHeader(key, val));
+  res.status(200);
+  
+  const reader = response.body!.getReader();
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    res.write(value);
+  }
+  res.end();
+});
+
+app.listen(4000, () => console.log('Edge Proxy running on :4000'));
 ```
 
 ---
 
 ## 3. The Client-Side Swap
 
-You don't need to rewrite your frontend. You just need to wrap your fetches.
+You don't need to rewrite your frontend. You just need to wrap your fetches using one of our integration hooks: `@antic-pt/react-query` or `@antic-pt/swr`.
 
-### Add the SDK
-Copy the pre-compiled global SDK into your project folder so you can include it via a `<script>` tag:
+### React Query Example
+
 ```bash
-cp ../packages/resolver-js/dist/index.global.js ./antic-pt.js
+npm install @antic-pt/react-query @tanstack/react-query
 ```
 
-### Wrap your requests
 ```javascript
-// BEFORE:
-// const data = await fetch('https://your-api.com/v1/dashboard').then(r => r.json());
-// updateUI(data);
+import { useAnticQuery } from "@antic-pt/react-query";
 
-// AFTER:
-// Assuming you included <script src="antic-pt.js"></script> and AnticipationResolver is on window.AnticPT
-const AnticPT = window.AnticPT.AnticipationResolver || window.AnticPT;
+function Dashboard() {
+  const { data, status, meta } = useAnticQuery({
+    queryKey: ['dashboard'],
+    // Point to your Edge Proxy's /spec endpoint
+    queryFn: () => fetch('http://localhost:4000/spec/v1/dashboard').then(r => r.json()),
+    
+    // Configure Anticipation Protocol behavior
+    anticipation: {
+      baseUrl: 'http://localhost:4000',
+      maxWindow: 3000
+    }
+  });
 
-// 1. Initialize the resolver for your specific path
-const resolver = new AnticPT('/v1/dashboard', {
-  baseUrl: 'http://localhost:4002', // Point to your Spec-Link instance
-  maxWindow: 3000
-});
+  if (status === 'pending') return <div>Loading...</div>;
 
-// 2. Register event handlers
-resolver.on('speculative', (data, meta) => {
-  console.log("🚀 Fast Track Hit!");
-  updateUI(data); // Render instantly
-});
-
-resolver.on('patch', (ops) => {
-  console.log("🔧 Surgical Correction:", ops);
-  // Apply RFC 6902 JSON patch ops to your UI state
-});
-
-resolver.on('fill', (fields) => {
-  console.log("📥 Deferred Fields Arrived:", fields);
-  // Merge deferred fields into your UI state
-});
-
-// 3. Trigger the fetch
-resolver.fetch();
+  return (
+    <div>
+      {/* status will be 'speculative', 'patching', or 'confirmed' */}
+      <div>Status: {status}</div>
+      <pre>{JSON.stringify(data, null, 2)}</pre>
+    </div>
+  );
+}
 ```
 
 ---
@@ -120,30 +132,28 @@ resolver.fetch();
 
 Open Chrome DevTools -> Network Tab.
 
-1.  **The Fetch**: Trigger your fetch. You should see a request to `localhost:4002/spec/v1/dashboard`. Check the response headers:
+1.  **The Fetch**: Trigger your fetch. You should see a request to `localhost:4000/spec/v1/dashboard`. Check the response headers:
     *   `X-Antic-State: speculative` (Success! You just saved ~300ms).
     *   `X-Antic-Reconcile-Id: arc_...` (The link to the formal track).
-2.  **The Signal Channel**: Look for a persistent SSE connection to `localhost:4002/antic/signals`.
+2.  **The Signal Channel**: Look for a persistent SSE connection to `localhost:4000/antic/signals`.
     *   Click it and view the `EventStream` tab.
     *   If you see a `CONFIRM` or `PATCH` message with matching `Id`, the background reconciliation is working.
-3.  **The Console**: You should see your "🚀 Fast Track Hit!" log, followed instantly by your UI rendering, and then the patch/fill logs hundreds of milliseconds later.
+3.  **The UI**: You should see your UI instantly render, and a few hundred milliseconds later, the data patches into place without a full screen flash.
 
 ---
 
 ## 5. Current Limitations (v0.2.2)
 
-Before you deploy this past your local machine, you must understand what Spec-Link *cannot* do right now.
+Before you deploy this past your local machine, you must understand what Edge Proxy *cannot* do right now.
 
-*   **In-Memory Only**: The State-Vault and Signal Hub run entirely in memory. If you restart the proxy, all cache is lost and all active SSE connections drop.
-*   **Single-Node Deployments**: Because of the above, you cannot put Spec-Link behind a load balancer with multiple instances yet. An SSE connection on Node A cannot receive reconciliation signals generated by Node B.
-*   **Cold Hits**: The very first request to any path/query combination is a mandatory "Cold Hit" to populate the vault. The fast track only kicks in on the second request.
+*   **Caching Strategy**: Currently relies on the developer providing their own caching mechanism or extending the proxy. The Redis PubSub implementation relies entirely on pub/sub events.
+*   **Cold Hits**: The very first request to any path/query combination is a mandatory "Cold Hit". The fast track only kicks in on the second request.
 
 ---
 
 ## 6. The Validation Milestone
 
 If you get this running against a real endpoint you own, **we want to hear from you.** 
-- What fields were hard to classify?
 - Did the JSON Patch cause a weird UI flicker?
 - Did the performance gain feel real to your users?
 
