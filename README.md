@@ -13,8 +13,8 @@ Unlike traditional caching, Antic-PT provides **Field-Level Reconciliation** for
 
 - **Surgical Reconciliation**: Uses JSON Patches (RFC 6902) to correct specific fields in a live UI without a full reload.
 - **Certainty Classes**: Fields are classified as `SPECULATIVE` (render fast) or `DEFERRED` (withhold until verified).
-- **Provisional Write Commits**: Submit writes safely with sub-15ms UI feedback, then receive an authoritative `CONFIRM` (with drift correction) or `ABORT` (with revert state) signal.
-- **Multiplexed Signals**: A dedicated SSE channel (`/antic/signals`) handles all background reconciliation.
+- **Provisional Write Commits**: Fully supported out-of-the-box. Submit writes safely with sub-15ms UI feedback, then receive an authoritative `CONFIRM` (with drift correction) or `ABORT` (with revert state) signal.
+- **Multiplexed Signals**: A dedicated SSE channel (`/antic/signals`) handles all background reconciliation, automatically extracting `baseUrl` connections from absolute URLs in the SDKs.
 
 ## Structure
 

@@ -111,9 +111,9 @@ This model acknowledges what practitioners already know: not all fields in a res
 
 ### Honesty: Acknowledging the Write-Side Destination
 
-The write-side provisional commit model — where a server issues a provisional 202 Accepted on a mutation and later emits CONFIRM or ABORT when the transaction finalizes — is the genuinely novel territory this protocol is heading toward. No existing HTTP standard formalizes this model. It would represent a meaningful contribution.
+The write-side provisional commit model — where a server issues a provisional 202 Accepted on a mutation and later emits CONFIRM or ABORT when the transaction finalizes — is the genuinely novel territory this protocol was heading toward. No existing HTTP standard formalizes this model. It represents a meaningful contribution.
 
-But it requires more than a proxy layer. It requires durable signal delivery, server-side provisional state persistence, and a trust foundation built by proving the read-side signal vocabulary in production. v0.2 is honest about this. The write-side spec is documented as a future extension, not pretended as a current capability.
+This requires durable signal delivery, server-side provisional state persistence, and a trust foundation built by proving the read-side signal vocabulary in production. In v0.2.2, we have proudly crossed this milestone. The write-side provisional commit model is now a **newly realized capability** supported out-of-the-box by the Edge Proxy and the `@antic-pt/react-query` SDK via `useAnticMutation`.
 
 ---
 

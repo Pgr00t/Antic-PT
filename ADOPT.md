@@ -99,20 +99,28 @@ npm install @antic-pt/react-query @tanstack/react-query
 ```
 
 ```javascript
-import { useAnticQuery } from "@antic-pt/react-query";
+import { useAnticQuery, useAnticMutation } from "@antic-pt/react-query";
 
 function Dashboard() {
-  const { data, status, meta } = useAnticQuery({
-    queryKey: ['dashboard'],
+  // 1. Fetch data speculatively with the fast track
+  const { data, status, meta } = useAnticQuery(
+    ['dashboard'],
     // Point to your Edge Proxy's /spec endpoint
-    queryFn: () => fetch('http://localhost:4000/spec/v1/dashboard').then(r => r.json()),
-    
-    // Configure Anticipation Protocol behavior
-    anticipation: {
-      baseUrl: 'http://localhost:4000',
-      maxWindow: 3000
+    'http://localhost:4000/spec/v1/dashboard',
+    {
+      // baseUrl is automatically extracted from the absolute URL!
+      anticOptions: { maxWindow: 3000 }
     }
-  });
+  );
+
+  // 2. Optimistic Writes with Provisional Commits
+  const mutation = useAnticMutation(
+    'http://localhost:4000/spec/v1/order',
+    'POST',
+    {
+      queryKeyToInvalidate: ['dashboard']
+    }
+  );
 
   if (status === 'pending') return <div>Loading...</div>;
 
@@ -121,6 +129,14 @@ function Dashboard() {
       {/* status will be 'speculative', 'patching', or 'confirmed' */}
       <div>Status: {status}</div>
       <pre>{JSON.stringify(data, null, 2)}</pre>
+      
+      <button 
+        onClick={() => mutation.mutate({ item: "Test", qty: 1 })}
+        disabled={mutation.isPending}
+      >
+        {mutation.isPending ? 'Placing Order...' : 'Place Order'}
+      </button>
+      {mutation.anticStatus && <div>Mutation Status: {mutation.anticStatus}</div>}
     </div>
   );
 }

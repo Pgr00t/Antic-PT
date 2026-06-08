@@ -48,7 +48,6 @@ SDK bindings for frameworks are available in the repository:
 
 - Changes that re-introduce response-level speculation (the entire response is either speculated or not). Field-level classification is a core spec requirement.
 - Changes that add a confidence score header or proxy-computed "AI" speculation gating. Per the spec and rationale: the proxy emits facts (`X-Antic-Staleness`, `X-Antic-Volatility`), the SDK computes rendering decisions.
-- Write-side provisional commit work against `main`. Write-side work belongs on the `v1-provisional-writes` branch.
 - New runtime dependencies in the JS SDK.
 - Changes that break the `CONFIRM`, `PATCH`, `FILL`, `REPLACE`, `ABORT` signal ordering contract (see spec §7).
 
@@ -59,11 +58,9 @@ SDK bindings for frameworks are available in the repository:
 ### Monorepo Setup
 
 ```bash
-# We recommend using npm to install dependencies in individual workspaces:
-cd packages/edge-proxy && npm install
-cd ../resolver && npm install
-cd ../react-query && npm install
-cd ../swr && npm install
+# We use NPM Workspaces. Simply run install from the root:
+npm install
+npm run build --workspaces --if-present
 ```
 
 ### Demo

@@ -15,7 +15,7 @@ Antic-PT does not replace HTTP caching. It replaces the silence that follows it.
 
 ## Status of This Document
 
-Draft v0.2.2. Not yet submitted for standardization. Reference implementation available as Edge Proxy (Node.js) and @antic-pt/resolver (JavaScript SDK). Section 13 (Provisional Write Commits) is fully specified; implementation targets v1.0.
+Draft v0.2.2. Not yet submitted for standardization. Reference implementation available as Edge Proxy (Node.js) and @antic-pt/resolver (JavaScript SDK). Section 13 (Provisional Write Commits) is now fully implemented.
 
 ---
 
