@@ -1,6 +1,6 @@
 {
   "name": "@antic-pt/edge-proxy",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "description": "Stateless Edge Proxy for the Anticipation Protocol",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",

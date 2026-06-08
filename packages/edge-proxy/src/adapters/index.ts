@@ -22,3 +22,15 @@ export interface PubSubAdapter {
    */
   unsubscribe(reconcileId: string): Promise<void>;
 }
+
+export interface StateVaultAdapter {
+  /**
+   * Retrieve cached data by key.
+   */
+  get(key: string): Promise<any | null>;
+
+  /**
+   * Store data in the vault.
+   */
+  set(key: string, data: any): Promise<void>;
+}

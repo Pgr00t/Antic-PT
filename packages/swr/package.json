@@ -1,6 +1,6 @@
 {
   "name": "@antic-pt/swr",
-  "version": "0.2.2",
+  "version": "1.0.0",
   "description": "SWR integration for Anticipation Protocol",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",

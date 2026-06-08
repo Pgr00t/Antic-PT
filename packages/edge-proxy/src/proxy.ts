@@ -1,18 +1,21 @@
-import { PubSubAdapter } from "./adapters";
+import { PubSubAdapter, StateVaultAdapter } from "./adapters";
 import { SSEConnection } from "./sse";
 import { compare } from "fast-json-patch";
 
 export interface EdgeProxyOptions {
   pubsub: PubSubAdapter;
+  vault: StateVaultAdapter;
   upstreamUrl: string;
 }
 
 export class EdgeProxy {
   private pubsub: PubSubAdapter;
+  private vault: StateVaultAdapter;
   private upstreamUrl: string;
 
   constructor(options: EdgeProxyOptions) {
     this.pubsub = options.pubsub;
+    this.vault = options.vault;
     this.upstreamUrl = options.upstreamUrl;
   }
 
@@ -32,20 +35,22 @@ export class EdgeProxy {
     path: string,
   ): Promise<Response> {
     const reconcileId = this.generateReconcileId();
+    const clientId = request.headers.get("X-Antic-Client-Id") || "default-client";
 
-    // Simulate Cache/Speculation hit
-    // In a full implementation, we'd look up the last known state from KV or Cache API
-    // For this prototype, we immediately trigger background revalidation
-    const speculativeData = {
+    // 1. Fetch from State Vault
+    // Use path as the cache key (or clientId:path if tenant-isolated)
+    const cacheKey = `antic:vault:${clientId}:${path}`;
+    const cachedData = await this.vault.get(cacheKey);
+
+    // 2. Prepare Speculative Data
+    const speculativeData = cachedData || {
       _status: "speculative",
       message: "Loading latest state...",
     };
 
-    const clientId = request.headers.get("X-Antic-Client-Id") || "default-client";
-
-    // Kick off background revalidation using the waitUntil pattern (standard in Edge environments)
-    // We pass it to the Edge platform so it survives the response returning
-    this.revalidateInBackground(request, reconcileId, clientId, path).catch(console.error);
+    // 3. Kick off background revalidation using the waitUntil pattern
+    // Pass the speculativeData (vaultSnapshot) down to compute the surgical patch
+    this.revalidateInBackground(request, reconcileId, clientId, path, cacheKey, speculativeData).catch(console.error);
 
     return new Response(JSON.stringify(speculativeData), {
       status: 200,
@@ -138,6 +143,8 @@ export class EdgeProxy {
     reconcileId: string,
     clientId: string,
     path: string,
+    cacheKey: string,
+    vaultSnapshot: any,
   ): Promise<void> {
     const upstreamUrl = `${this.upstreamUrl}${path}`;
 
@@ -153,13 +160,11 @@ export class EdgeProxy {
 
       const upstreamData = await response.json();
 
-      // Calculate JSON Patch between the speculative state and actual state
-      // (Assuming the speculative state was known, here we just replace for prototype)
-      const speculativeData = {
-        _status: "speculative",
-        message: "Loading latest state...",
-      };
-      const ops = compare(speculativeData, upstreamData);
+      // Update State Vault with the fresh data
+      await this.vault.set(cacheKey, upstreamData);
+
+      // Calculate Surgical JSON Patch between the vault snapshot and fresh upstream data
+      const ops = compare(vaultSnapshot, upstreamData);
 
       // Publish the patch via PubSub to whichever Edge Isolate holds the SSE connection
       await this.pubsub.publish(clientId, "patch", { id: reconcileId, ops });

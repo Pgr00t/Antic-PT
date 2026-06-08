@@ -1,6 +1,6 @@
 import { webcrypto } from 'node:crypto';
 if (!global.crypto) global.crypto = webcrypto as any;
-import { EdgeProxy, PubSubAdapter } from '../src';
+import { EdgeProxy, PubSubAdapter, InMemoryStateVaultAdapter } from '../src';
 
 class MockPubSub implements PubSubAdapter {
   private listeners: Map<string, Array<(event: string, data: any) => void>> = new Map();
@@ -45,6 +45,7 @@ global.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
 async function runTest() {
   const proxy = new EdgeProxy({
     pubsub: new MockPubSub(),
+    vault: new InMemoryStateVaultAdapter(),
     upstreamUrl: 'https://api.mock-exchange.com'
   });
 

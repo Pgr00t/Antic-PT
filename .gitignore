@@ -1,7 +1,6 @@
 # Node.js
 node_modules/
 .npm
-package-lock.json
 *.log
 
 # Go

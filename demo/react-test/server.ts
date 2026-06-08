@@ -1,7 +1,7 @@
 import * as http from 'http';
 import { webcrypto } from 'node:crypto';
 if (!global.crypto) global.crypto = webcrypto as any;
-import { EdgeProxy, PubSubAdapter } from '@antic-pt/edge-proxy';
+import { EdgeProxy, PubSubAdapter, InMemoryStateVaultAdapter } from '@antic-pt/edge-proxy';
 
 class MemoryPubSub implements PubSubAdapter {
   private listeners: Map<string, Array<(event: string, data: any) => void>> = new Map();
@@ -24,6 +24,7 @@ class MemoryPubSub implements PubSubAdapter {
 
 const proxy = new EdgeProxy({
   pubsub: new MemoryPubSub(),
+  vault: new InMemoryStateVaultAdapter(),
   upstreamUrl: 'http://127.0.0.1:4003' // Mock upstream
 });
 
