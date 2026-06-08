@@ -1,39 +1,39 @@
 import React from "react";
 import { createRoot } from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { useAnticQuery } from "@antic-pt/react-query";
+import { StandardDashboard } from "./StandardDashboard";
+import { AnticDashboard } from "./AnticDashboard";
 
 const queryClient = new QueryClient();
-
-function Dashboard() {
-  const { data, anticStatus, anticMeta, deferredFields } = useAnticQuery(
-    ["dashboard", 1],
-    "http://localhost:4002/spec/api/v3/ticker/24hr?symbol=BTCUSDT",
-  );
-
-  return (
-    <div style={{ padding: 20, fontFamily: "sans-serif" }}>
-      <h1>Dashboard Demo</h1>
-      <p>
-        Status: <strong>{anticStatus}</strong>
-      </p>
-      {anticMeta && <p>Reconcile ID: {anticMeta.reconcileId}</p>}
-      {deferredFields.length > 0 && (
-        <p>Deferred Fields: {deferredFields.join(", ")}</p>
-      )}
-
-      <h3>Data:</h3>
-      <pre style={{ background: "#f4f4f4", padding: 10 }}>
-        {JSON.stringify(data, null, 2)}
-      </pre>
-    </div>
-  );
-}
 
 function App() {
   return (
     <QueryClientProvider client={queryClient}>
-      <Dashboard />
+      <div style={{ 
+        display: "flex", 
+        flexDirection: "column",
+        minHeight: "100vh", 
+        backgroundColor: "#121212", 
+        color: "#fff", 
+        fontFamily: "system-ui, -apple-system, sans-serif",
+        padding: "40px"
+      }}>
+        <div style={{ textAlign: "center", marginBottom: "40px" }}>
+          <h1 style={{ margin: 0, fontSize: "2.5em" }}>Antic-PT Protocol Demo</h1>
+          <p style={{ color: "#aaa", fontSize: "1.2em" }}>The end of loading spinners.</p>
+        </div>
+
+        <div style={{ 
+          display: "flex", 
+          gap: "40px", 
+          maxWidth: "1200px", 
+          margin: "0 auto", 
+          width: "100%" 
+        }}>
+          <StandardDashboard />
+          <AnticDashboard />
+        </div>
+      </div>
     </QueryClientProvider>
   );
 }
