@@ -255,9 +255,15 @@ export class AnticipationResolver {
 
   constructor(path: string, options: ResolverOptions = {}) {
     this.path = path;
-    this.baseUrl =
-      options.baseUrl ??
-      (typeof window !== "undefined" ? window.location.origin : "");
+    
+    let defaultBaseUrl = typeof window !== "undefined" ? window.location.origin : "";
+    if ((path.startsWith("http://") || path.startsWith("https://")) && !options.baseUrl) {
+      try {
+        defaultBaseUrl = new URL(path).origin;
+      } catch (e) {}
+    }
+    
+    this.baseUrl = options.baseUrl ?? defaultBaseUrl;
     this.maxWindow = options.maxWindow ?? 3000;
     this.onTimeout = options.onTimeout ?? "refetch";
     this.clientId = getClientId();
@@ -283,7 +289,8 @@ export class AnticipationResolver {
     this.cleanup();
     this.status = "idle";
 
-    const url = `${this.baseUrl}${this.path}`;
+    const isAbsolute = this.path.startsWith("http://") || this.path.startsWith("https://");
+    const url = isAbsolute ? this.path : `${this.baseUrl}${this.path}`;
 
     let response: Response;
     try {
@@ -383,12 +390,81 @@ export class AnticipationResolver {
 
     // Start max-window timer.
     const effectiveWindow = Math.min(maxWindowHeader, this.maxWindow);
+    this.startTimeout(effectiveWindow, reconcileId);
+  }
+
+  /** Send a provisional write (POST/PUT/PATCH) */
+  async mutate(method: string, payload: any): Promise<void> {
+    this.cleanup();
+    this.status = "idle";
+
+    const isAbsolute = this.path.startsWith("http://") || this.path.startsWith("https://");
+    const url = isAbsolute ? this.path : `${this.baseUrl}${this.path}`;
+
+    let response: Response;
+    try {
+      response = await globalThis.fetch(url, {
+        method,
+        headers: {
+          "Content-Type": "application/json",
+          "Accept": "application/json",
+          "X-Antic-Client-Id": this.clientId,
+        },
+        body: JSON.stringify(payload)
+      });
+    } catch {
+      this.emit("abort", "network_error", true);
+      this.status = "error";
+      return;
+    }
+
+    if (!response.ok && response.status !== 202) {
+      this.emit("abort", `http_${response.status}`, response.status >= 500);
+      this.status = "error";
+      return;
+    }
+
+    let data: any;
+    try {
+      data = await response.json();
+    } catch {
+      this.emit("abort", "parse_error", false);
+      this.status = "error";
+      return;
+    }
+
+    const state = response.headers.get("X-Antic-State");
+    const reconcileId = response.headers.get("X-Antic-Reconcile-Id") ?? "";
+
+    if (state !== "provisional" || !reconcileId) {
+      this.status = "confirmed";
+      this.emit("speculative", data, {} as any);
+      this.emit("confirm");
+      return;
+    }
+
+    this.status = "speculative";
+    this.emit("speculative", data, { reconciledId: reconcileId } as any);
+
+    const channel = SignalChannel.getInstance(this.baseUrl, this.clientId);
+    this.unsubscribeSignal = channel.subscribe(
+      reconcileId,
+      (event, payload) => {
+        this.handleSignal(event, payload);
+      },
+    );
+
+    // 10-second TTL fallback for writes
+    this.startTimeout(10000, reconcileId);
+  }
+
+  private startTimeout(windowMs: number, reconcileId: string) {
     this.maxWindowTimer = setTimeout(() => {
       this.cleanup();
       const meta: AbandonMeta = {
         reconciledId: reconcileId,
         reason: "timeout",
-        elapsed: effectiveWindow,
+        elapsed: windowMs,
         resource: this.path,
       };
       this.emit("speculationAbandoned", meta);
@@ -398,7 +474,7 @@ export class AnticipationResolver {
         this.emit("abort", "timeout", true);
         this.status = "error";
       }
-    }, effectiveWindow);
+    }, windowMs);
   }
 
   /** Directly re-fetch the resource (used after retryable ABORT or speculationAbandoned). */
