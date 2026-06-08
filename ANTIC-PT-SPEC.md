@@ -1,5 +1,5 @@
 # Antic-PT Protocol Specification
-## Draft v0.2.2 — Partial Payload Reconciliation + Provisional Write Commits
+## Draft v1.0.0 — Partial Payload Reconciliation + Provisional Write Commits
 
 ---
 
@@ -15,7 +15,7 @@ Antic-PT does not replace HTTP caching. It replaces the silence that follows it.
 
 ## Status of This Document
 
-Draft v0.2.2. Not yet submitted for standardization. Reference implementation available as Edge Proxy (Node.js) and @antic-pt/resolver (JavaScript SDK). Section 13 (Provisional Write Commits) is now fully implemented.
+Draft v1.0.0. Not yet submitted for standardization. Reference implementation available as Edge Proxy (Node.js) and @antic-pt/resolver (JavaScript SDK). Section 13 (Provisional Write Commits) is now fully implemented.
 
 ---
 
@@ -990,6 +990,6 @@ The read-side work in v0.2 builds the trust foundation in the signal vocabulary,
 
 ---
 
-*Antic-PT Draft v0.2.2 — Section 13 Provisional Write Commits fully specified.*
+*Antic-PT Draft v1.0.0 — Section 13 Provisional Write Commits fully specified.*
 *Reference implementation: Edge Proxy (Go), AnticipationResolver (JavaScript)*
 *License: MIT*

@@ -158,7 +158,7 @@ Open Chrome DevTools -> Network Tab.
 
 ---
 
-## 5. Current Limitations (v0.2.2)
+## 5. Current Limitations (v1.0.0)
 
 Before you deploy this past your local machine, you must understand what Edge Proxy *cannot* do right now.
 
