@@ -4,7 +4,7 @@ export interface PubSubAdapter {
    */
   publish(
     reconcileId: string,
-    event: "patch" | "fill" | "replace",
+    event: "patch" | "fill" | "replace" | "confirm" | "abort",
     data: any,
   ): Promise<void>;
 
@@ -14,7 +14,7 @@ export interface PubSubAdapter {
    */
   subscribe(
     reconcileId: string,
-    onMessage: (event: "patch" | "fill" | "replace", data: any) => void,
+    onMessage: (event: "patch" | "fill" | "replace" | "confirm" | "abort", data: any) => void,
   ): Promise<void>;
 
   /**
