@@ -1,0 +1,14 @@
+{
+  "name": "antic-pt-monorepo",
+  "version": "0.2.2",
+  "private": true,
+  "scripts": {
+    "build": "npm run build --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present",
+    "dev": "npm run dev --workspace=demo/react-test"
+  },
+  "workspaces": [
+    "packages/*",
+    "demo/*"
+  ]
+}
