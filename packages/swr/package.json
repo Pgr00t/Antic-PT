@@ -12,7 +12,7 @@
     "swr": "^2.0.0"
   },
   "dependencies": {
-    "@antic-pt/resolver": "file:../resolver"
+    "@antic-pt/resolver": "*"
   },
   "devDependencies": {
     "@types/react": "^19.2.16",
