@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "private": true,
   "scripts": {
-    "build": "npm run build --workspaces --if-present",
+    "build": "npm run build --workspace=@antic-pt/edge-proxy && npm run build --workspace=@antic-pt/resolver && npm run build --workspace=@antic-pt/react-query && npm run build --workspace=@antic-pt/swr",
     "test": "npm run test --workspaces --if-present",
     "dev": "npm run dev --workspace=demo/react-test"
   },
