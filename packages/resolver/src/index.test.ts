@@ -6,6 +6,7 @@
  * and protocol state transitions via a mock fetch.
  */
 
+import { describe, it, expect } from "vitest";
 import { AnticipationResolver, PatchOp } from "./resolver";
 
 // ── Header parsing (via exposed static helpers) ──────────────────────────────
