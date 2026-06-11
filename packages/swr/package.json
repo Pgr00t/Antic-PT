@@ -12,12 +12,25 @@
     "swr": "^2.0.0"
   },
   "dependencies": {
-    "@antic-pt/resolver": "*"
+    "@antic-pt/resolver": "^1.0.0"
   },
   "devDependencies": {
     "@types/react": "^19.2.16",
     "react": "^19.2.7",
     "swr": "^2.4.1",
     "typescript": "~5.4.5"
-  }
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Pgr00t/Antic-PT.git"
+  },
+  "homepage": "https://github.com/Pgr00t/Antic-PT#readme",
+  "bugs": {
+    "url": "https://github.com/Pgr00t/Antic-PT/issues"
+  },
+  "author": "Antic-PT Open Source Project",
+  "license": "MIT",
+  "files": [
+    "dist"
+  ]
 }

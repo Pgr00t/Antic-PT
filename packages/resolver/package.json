@@ -34,5 +34,13 @@
   },
   "peerDependencies": {
     "react": "^19.2.7"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Pgr00t/Antic-PT.git"
+  },
+  "homepage": "https://github.com/Pgr00t/Antic-PT#readme",
+  "bugs": {
+    "url": "https://github.com/Pgr00t/Antic-PT/issues"
   }
 }

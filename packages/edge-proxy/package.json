@@ -18,5 +18,16 @@
     "typescript": "~5.4.5"
   },
   "author": "Antic-PT Open Source Project",
-  "license": "MIT"
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Pgr00t/Antic-PT.git"
+  },
+  "homepage": "https://github.com/Pgr00t/Antic-PT#readme",
+  "bugs": {
+    "url": "https://github.com/Pgr00t/Antic-PT/issues"
+  },
+  "files": [
+    "dist"
+  ]
 }

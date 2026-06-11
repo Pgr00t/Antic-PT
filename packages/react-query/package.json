@@ -12,12 +12,25 @@
     "react": "^18.0.0 || ^19.0.0"
   },
   "dependencies": {
-    "@antic-pt/resolver": "*"
+    "@antic-pt/resolver": "^1.0.0"
   },
   "devDependencies": {
     "@tanstack/react-query": "^5.101.0",
     "@types/react": "^19.2.16",
     "react": "^19.2.7",
     "typescript": "~5.4.5"
-  }
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Pgr00t/Antic-PT.git"
+  },
+  "homepage": "https://github.com/Pgr00t/Antic-PT#readme",
+  "bugs": {
+    "url": "https://github.com/Pgr00t/Antic-PT/issues"
+  },
+  "author": "Antic-PT Open Source Project",
+  "license": "MIT",
+  "files": [
+    "dist"
+  ]
 }
